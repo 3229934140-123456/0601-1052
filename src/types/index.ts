@@ -14,6 +14,7 @@ export interface Transaction {
   updatedAt: string;
   adjustmentTargetBalance?: number;
   adjustmentDiff?: number;
+  recurringId?: string;
 }
 
 export interface Category {

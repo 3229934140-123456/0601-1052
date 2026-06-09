@@ -65,3 +65,13 @@ export const getNextDate = (date: string, frequency: Frequency): string => {
   }
   return format(next, 'yyyy-MM-dd');
 };
+
+export const getUpcomingDates = (startDate: string, frequency: Frequency, count: number): string[] => {
+  const result: string[] = [];
+  let current = startDate;
+  for (let i = 0; i < count; i++) {
+    result.push(current);
+    current = getNextDate(current, frequency);
+  }
+  return result;
+};

@@ -2,14 +2,14 @@ import { useState, useRef, useMemo } from 'react';
 import {
   ChevronRight, Plus, Edit2, Trash2, Tag, Wallet, RefreshCcw,
   Download, Upload, Lock, Unlock, AlertTriangle, Check, Eye, EyeOff,
-  RefreshCw, ArrowRightLeft, Scale, History, X,
+  RefreshCw, ArrowRightLeft, Scale, History, X, SkipForward, Zap, Calendar,
 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { DynamicIcon } from '@/components/DynamicIcon';
 import { Modal } from '@/components/Modal';
 import { PageHeader } from '@/components/Layout/PageHeader';
 import { exportData, importData } from '@/utils/export';
-import { todayStr, formatDateCN } from '@/utils/date';
+import { todayStr, formatDateCN, getUpcomingDates } from '@/utils/date';
 import { formatMoney } from '@/utils/money';
 import type { Category, Account, Recurring, TransactionType, Frequency } from '@/types';
 
@@ -1118,14 +1118,22 @@ const AccountsSection = ({ onClose }: SectionProps) => {
 const RecurringSection = ({ onClose }: SectionProps) => {
   const [editingRecurring, setEditingRecurring] = useState<Recurring | null>(null);
   const [isNew, setIsNew] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const recurring = useStore((s) => s.recurring);
+  const allRecurring = useStore((s) => s.recurring);
   const categories = useStore((s) => s.categories);
   const accounts = useStore((s) => s.accounts);
   const currency = useStore((s) => s.settings.currency);
   const addRecurring = useStore((s) => s.addRecurring);
   const updateRecurring = useStore((s) => s.updateRecurring);
   const deleteRecurring = useStore((s) => s.deleteRecurring);
+  const skipRecurringNext = useStore((s) => s.skipRecurringNext);
+  const recordRecurringNow = useStore((s) => s.recordRecurringNow);
+
+  const recurring = useMemo(
+    () => [...allRecurring].sort((a, b) => a.nextDate.localeCompare(b.nextDate)),
+    [allRecurring]
+  );
 
   const openNew = () => {
     setIsNew(true);
@@ -1212,63 +1220,107 @@ const RecurringSection = ({ onClose }: SectionProps) => {
             {recurring.map((r) => {
               const cat = categories.find((c) => c.id === r.categoryId);
               const acc = accounts.find((a) => a.id === r.accountId);
+              const isExpanded = expandedId === r.id;
+              const upcoming = getUpcomingDates(r.nextDate, r.frequency, 5);
               return (
                 <div
                   key={r.id}
-                  className="p-4 rounded-2xl bg-slate-50 hover:bg-slate-100 transition-colors"
+                  className="rounded-2xl bg-slate-50 hover:bg-slate-100 transition-colors overflow-hidden"
                 >
-                  <div className="flex items-start gap-3">
-                    <div
-                      className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-                      style={{ backgroundColor: `${cat?.color || '#6B7280'}20`, color: cat?.color || '#6B7280' }}
-                    >
-                      <DynamicIcon name={cat?.icon || 'MoreHorizontal'} size={20} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-slate-800">{cat?.name || '未知'}</span>
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${
-                          r.active ? 'bg-teal-50 text-teal-600' : 'bg-slate-200 text-slate-500'
-                        }`}>
-                          {r.active ? '启用' : '停用'}
-                        </span>
+                  <div className="p-4 cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : r.id)}>
+                    <div className="flex items-start gap-3">
+                      <div
+                        className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+                        style={{ backgroundColor: `${cat?.color || '#6B7280'}20`, color: cat?.color || '#6B7280' }}
+                      >
+                        <DynamicIcon name={cat?.icon || 'MoreHorizontal'} size={20} />
                       </div>
-                      <div className="text-xs text-slate-500 mt-1">
-                        {frequencyLabels[r.frequency]} · {acc?.name || '未知账户'}
-                        {r.note && ` · ${r.note}`}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold text-slate-800">{cat?.name || '未知'}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${
+                            r.active ? 'bg-teal-50 text-teal-600' : 'bg-slate-200 text-slate-500'
+                          }`}>
+                            {r.active ? '启用' : '停用'}
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-500 mt-1">
+                          {frequencyLabels[r.frequency]} · {acc?.name || '未知账户'}
+                          {r.note && ` · ${r.note}`}
+                        </div>
+                        <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
+                          <Calendar size={12} />
+                          下次: {formatDateCN(r.nextDate)}
+                          <ChevronRight size={12} className={`transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                        </div>
                       </div>
-                      <div className="text-xs text-slate-500 mt-0.5">
-                        下次: {formatDateCN(r.nextDate)}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className={`text-base font-bold ${r.type === 'income' ? 'text-emerald-600' : 'text-slate-800'}`}>
-                        {r.type === 'income' ? '+' : '-'}{formatMoney(r.amount, currency)}
-                      </div>
-                      <div className="flex items-center justify-end gap-1 mt-2">
-                        <button
-                          onClick={() => updateRecurring(r.id, { active: !r.active })}
-                          className={`p-1.5 rounded-lg transition-colors ${
-                            r.active ? 'text-teal-600 hover:bg-teal-50' : 'text-slate-400 hover:bg-slate-100'
-                          }`}
-                        >
-                          <Check size={16} />
-                        </button>
-                        <button
-                          onClick={() => openEdit(r)}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-white transition-colors"
-                        >
-                          <Edit2 size={16} />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(r)}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                      <div className="text-right">
+                        <div className={`text-base font-bold ${r.type === 'income' ? 'text-emerald-600' : 'text-slate-800'}`}>
+                          {r.type === 'income' ? '+' : '-'}{formatMoney(r.amount, currency)}
+                        </div>
                       </div>
                     </div>
                   </div>
+
+                  {isExpanded && (
+                    <div className="px-4 pb-4 border-t border-slate-200/60 pt-3 space-y-3">
+                      <div>
+                        <div className="text-xs text-slate-500 mb-1.5 font-medium">未来 {upcoming.length} 次预计</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {upcoming.map((d, i) => (
+                            <span
+                              key={d}
+                              className={`text-xs px-2.5 py-1 rounded-full ${
+                                i === 0 ? 'bg-teal-100 text-teal-700 font-medium' : 'bg-white text-slate-600'
+                              }`}
+                            >
+                              {formatDateCN(d)}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); recordRecurringNow(r.id); }}
+                          disabled={!r.active}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-teal-500 text-white text-xs font-medium hover:bg-teal-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          <Zap size={13} />
+                          <span>立即记一笔</span>
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); skipRecurringNext(r.id); }}
+                          disabled={!r.active}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-medium hover:bg-amber-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          <SkipForward size={13} />
+                          <span>跳过本期</span>
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); updateRecurring(r.id, { active: !r.active }); }}
+                          className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                            r.active ? 'bg-slate-200 text-slate-600 hover:bg-slate-300' : 'bg-teal-500 text-white hover:bg-teal-600'
+                          }`}
+                        >
+                          <Check size={13} />
+                          <span>{r.active ? '暂停' : '启用'}</span>
+                        </button>
+                        <div className="flex-1" />
+                        <button
+                          onClick={(e) => { e.stopPropagation(); openEdit(r); }}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-white transition-colors"
+                        >
+                          <Edit2 size={15} />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDelete(r); }}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}

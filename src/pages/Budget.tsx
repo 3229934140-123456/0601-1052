@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Edit2, AlertTriangle, X, TrendingDown, BarChart3 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Edit2, AlertTriangle, X, TrendingDown, BarChart3, CalendarRange } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { DynamicIcon } from '@/components/DynamicIcon';
 import { ProgressBar } from '@/components/ProgressBar';
@@ -8,8 +8,11 @@ import { PageHeader } from '@/components/Layout/PageHeader';
 import { formatMonthCN, currentMonthStr, getRecentMonths, formatMonth, formatDateCN } from '@/utils/date';
 import { formatMoney } from '@/utils/money';
 
+type RangeType = 'month' | 'quarter' | 'year';
+
 export const Budget = () => {
   const [selectedMonth, setSelectedMonth] = useState(currentMonthStr());
+  const [rangeType, setRangeType] = useState<RangeType>('month');
   const [showTotalBudgetModal, setShowTotalBudgetModal] = useState(false);
   const [showCategoryBudgetModal, setShowCategoryBudgetModal] = useState<string | null>(null);
   const [showCategoryDetailModal, setShowCategoryDetailModal] = useState<string | null>(null);
@@ -30,6 +33,48 @@ export const Budget = () => {
 
   const monthOptions = getRecentMonths(12);
   const recent6Months = getRecentMonths(6);
+
+  const rangeMonths = useMemo(() => {
+    const idx = monthOptions.indexOf(selectedMonth);
+    if (rangeType === 'month') return [selectedMonth];
+    if (rangeType === 'quarter') {
+      const start = Math.min(Math.max(idx - (idx % 3), 0), Math.max(monthOptions.length - 3, 0));
+      return monthOptions.slice(start, start + 3);
+    }
+    const start = Math.min(Math.max(idx - (idx % 12), 0), Math.max(monthOptions.length - 12, 0));
+    return monthOptions.slice(start, start + 12);
+  }, [selectedMonth, rangeType, monthOptions]);
+
+  const rangeLabel = useMemo(() => {
+    if (rangeType === 'month') return formatMonthCN(selectedMonth);
+    if (rangeMonths.length === 0) return '';
+    const first = rangeMonths[0];
+    const last = rangeMonths[rangeMonths.length - 1];
+    if (rangeType === 'quarter') return `${formatMonthCN(first)} ~ ${formatMonthCN(last).slice(5)}`;
+    return `${formatMonthCN(first)} ~ ${formatMonthCN(last).slice(5)}`;
+  }, [rangeType, selectedMonth, rangeMonths]);
+
+  const rangeExpense = useMemo(() => {
+    return transactions
+      .filter((t) => rangeMonths.includes(formatMonth(t.date)) && t.type === 'expense')
+      .reduce((sum, t) => sum + t.amount, 0);
+  }, [transactions, rangeMonths]);
+
+  const rangeCategoryExpenses = useMemo(() => {
+    const map: Record<string, number> = {};
+    transactions
+      .filter((t) => rangeMonths.includes(formatMonth(t.date)) && t.type === 'expense')
+      .forEach((t) => {
+        map[t.categoryId] = (map[t.categoryId] || 0) + t.amount;
+      });
+    return map;
+  }, [transactions, rangeMonths]);
+
+  const getRangeCategoryTransactions = (categoryId: string) => {
+    return transactions
+      .filter((t) => rangeMonths.includes(formatMonth(t.date)) && t.categoryId === categoryId)
+      .sort((a, b) => b.date.localeCompare(a.date));
+  };
 
   const totalBudget = useMemo(() => {
     return budgets.find((b) => b.month === selectedMonth && b.categoryId === null)?.amount ?? 0;
@@ -142,35 +187,63 @@ export const Budget = () => {
           subtitle="设置并监控您的月度消费预算"
         />
 
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                const idx = monthOptions.indexOf(selectedMonth);
-                if (idx < monthOptions.length - 1) setSelectedMonth(monthOptions[idx + 1]);
-              }}
-              className="p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/10 transition-colors"
-            >
-              <ChevronLeft size={20} />
-            </button>
-            <h3 className="text-white text-xl font-bold min-w-[120px] text-center">
-              {formatMonthCN(selectedMonth)}
-            </h3>
-            <button
-              onClick={() => {
-                const idx = monthOptions.indexOf(selectedMonth);
-                if (idx > 0) setSelectedMonth(monthOptions[idx - 1]);
-              }}
-              className="p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/10 transition-colors"
-            >
-              <ChevronRight size={20} />
-            </button>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  const idx = monthOptions.indexOf(selectedMonth);
+                  const step = rangeType === 'year' ? 12 : rangeType === 'quarter' ? 3 : 1;
+                  const nextIdx = Math.min(idx + step, monthOptions.length - 1);
+                  setSelectedMonth(monthOptions[nextIdx]);
+                }}
+                className="p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/10 transition-colors"
+              >
+                <ChevronLeft size={20} />
+              </button>
+              <h3 className="text-white text-xl font-bold min-w-[160px] text-center">
+                {rangeLabel}
+              </h3>
+              <button
+                onClick={() => {
+                  const idx = monthOptions.indexOf(selectedMonth);
+                  const step = rangeType === 'year' ? 12 : rangeType === 'quarter' ? 3 : 1;
+                  const nextIdx = Math.max(idx - step, 0);
+                  setSelectedMonth(monthOptions[nextIdx]);
+                }}
+                className="p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/10 transition-colors"
+              >
+                <ChevronRight size={20} />
+              </button>
+            </div>
+          </div>
+
+          <div className="inline-flex p-1 bg-white/10 backdrop-blur rounded-xl gap-1">
+            {([
+              { key: 'month' as RangeType, label: '月度' },
+              { key: 'quarter' as RangeType, label: '季度' },
+              { key: 'year' as RangeType, label: '年度' },
+            ]).map((r) => (
+              <button
+                key={r.key}
+                onClick={() => setRangeType(r.key)}
+                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  rangeType === r.key
+                    ? 'bg-white text-amber-600 shadow'
+                    : 'text-white/80 hover:text-white'
+                }`}
+              >
+                {r.label}
+              </button>
+            ))}
           </div>
         </div>
 
         <div className="mt-6 bg-white/10 backdrop-blur rounded-3xl p-6">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-white/80 text-sm">月度总预算</span>
+            <span className="text-white/80 text-sm">
+              {rangeType === 'month' ? '月度总预算' : `${rangeMonths.length}个月累计`}
+            </span>
             <button
               onClick={openTotalBudgetModal}
               className="flex items-center gap-1 text-white/80 hover:text-white text-sm"
@@ -179,11 +252,18 @@ export const Budget = () => {
               <span>{totalBudget > 0 ? '修改' : '设置'}</span>
             </button>
           </div>
-          <div className="flex items-baseline gap-2 mb-4">
-            <span className="text-white text-4xl font-bold">{formatMoney(totalBudget, currency)}</span>
+          <div className="flex items-baseline gap-2 mb-2">
+            <span className="text-white text-4xl font-bold">
+              {formatMoney(rangeExpense, currency)}
+            </span>
+            {rangeMonths.length > 1 && (
+              <span className="text-white/70 text-sm">
+                月均 {formatMoney(rangeExpense / rangeMonths.length, currency)}
+              </span>
+            )}
           </div>
 
-          {totalBudget > 0 && (
+          {totalBudget > 0 && rangeType === 'month' && (
             <>
               <ProgressBar
                 value={monthExpense}
@@ -208,7 +288,7 @@ export const Budget = () => {
             </>
           )}
 
-          {isOverBudget && (
+          {isOverBudget && rangeType === 'month' && (
             <div className="mt-4 flex items-center gap-2 px-4 py-3 rounded-xl bg-white/15">
               <AlertTriangle size={20} className="text-amber-100 shrink-0" />
               <span className="text-sm text-white font-medium">本月已超出预算，请控制消费！</span>
@@ -234,9 +314,9 @@ export const Budget = () => {
           <div className="space-y-4">
             {categories.map((cat) => {
               const budget = categoryBudgets.find((b) => b.categoryId === cat.id);
-              const spent = categoryExpenses[cat.id] || 0;
-              const remaining = (budget?.amount || 0) - spent;
-              const isOver = (budget?.amount || 0) > 0 && spent > (budget?.amount || 0);
+              const spent = rangeType === 'month' ? (categoryExpenses[cat.id] || 0) : (rangeCategoryExpenses[cat.id] || 0);
+              const remaining = (budget?.amount || 0) - (categoryExpenses[cat.id] || 0);
+              const isOver = (budget?.amount || 0) > 0 && (categoryExpenses[cat.id] || 0) > (budget?.amount || 0);
               const recentStats = getCategoryRecentMonths(cat.id);
               const overBudgetCount = recentStats.filter((s) => s.isOver).length;
 
@@ -275,7 +355,7 @@ export const Budget = () => {
                     <ChevronRight size={16} className="text-slate-300" />
                   </div>
 
-                  {budget ? (
+                  {budget && rangeType === 'month' ? (
                     <div className="pl-12">
                       <ProgressBar
                         value={spent}
@@ -296,16 +376,31 @@ export const Budget = () => {
                     </div>
                   ) : (
                     <div className="pl-12">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openCategoryBudgetModal(cat.id);
-                        }}
-                        className="w-full py-2 rounded-xl border-2 border-dashed border-slate-200 text-xs text-slate-400 hover:border-teal-300 hover:text-teal-500 transition-colors flex items-center justify-center gap-1"
-                      >
-                        <Plus size={14} />
-                        <span>设置预算</span>
-                      </button>
+                      <div className="flex items-center justify-between py-1">
+                        <span className="text-xs text-slate-500">
+                          {rangeMonths.length > 1 ? `${rangeMonths.length}个月累计` : '本月支出'}
+                        </span>
+                        <span className="text-sm font-semibold text-slate-800">
+                          {formatMoney(spent, currency)}
+                          {rangeMonths.length > 1 && (
+                            <span className="text-xs text-slate-400 ml-2 font-normal">
+                              月均 {formatMoney(spent / rangeMonths.length, currency)}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      {rangeType === 'month' && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openCategoryBudgetModal(cat.id);
+                          }}
+                          className="w-full mt-1 py-1.5 rounded-xl border border-dashed border-slate-200 text-[11px] text-slate-400 hover:border-teal-300 hover:text-teal-500 transition-colors flex items-center justify-center gap-1"
+                        >
+                          <Plus size={12} />
+                          <span>设置预算</span>
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -410,11 +505,12 @@ export const Budget = () => {
           const cat = categories.find((c) => c.id === showCategoryDetailModal);
           if (!cat) return null;
           const budget = categoryBudgets.find((b) => b.categoryId === cat.id);
-          const spent = categoryExpenses[cat.id] || 0;
-          const remaining = (budget?.amount || 0) - spent;
-          const isOver = (budget?.amount || 0) > 0 && spent > (budget?.amount || 0);
+          const spent = rangeType === 'month' ? (categoryExpenses[cat.id] || 0) : (rangeCategoryExpenses[cat.id] || 0);
+          const monthSpent = categoryExpenses[cat.id] || 0;
+          const remaining = (budget?.amount || 0) - monthSpent;
+          const isOver = (budget?.amount || 0) > 0 && monthSpent > (budget?.amount || 0);
           const recentStats = getCategoryRecentMonths(cat.id);
-          const catTxns = getCategoryTransactions(cat.id);
+          const catTxns = rangeType === 'month' ? getCategoryTransactions(cat.id) : getRangeCategoryTransactions(cat.id);
 
           return (
             <div className="space-y-5">
@@ -425,42 +521,56 @@ export const Budget = () => {
                 >
                   <DynamicIcon name={cat.icon} size={24} />
                 </div>
-                <div>
+                <div className="flex-1 min-w-0">
                   <div className="font-semibold text-slate-800 text-lg">{cat.name}</div>
-                  <div className="text-xs text-slate-500">{formatMonthCN(selectedMonth)}</div>
+                  <div className="text-xs text-slate-500 flex items-center gap-1">
+                    <CalendarRange size={12} />
+                    {rangeLabel}
+                  </div>
                 </div>
               </div>
 
-              {budget ? (
-                <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-sm text-slate-500">预算</span>
-                    <span className="text-xl font-bold text-slate-800">{formatMoney(budget.amount, currency)}</span>
-                  </div>
-                  <ProgressBar
-                    value={spent}
-                    max={budget.amount}
-                    color="bg-teal-500"
-                    warningColor="bg-amber-500"
-                    dangerColor="bg-red-500"
-                    height="h-2.5"
-                  />
-                  <div className="flex justify-between text-sm">
-                    <span className="text-slate-600">
-                      已支出 <span className="font-semibold">{formatMoney(spent, currency)}</span>
-                    </span>
-                    <span className={isOver ? 'text-red-600 font-semibold' : 'text-slate-600'}>
-                      {remaining >= 0 ? `剩余 ${formatMoney(remaining, currency)}` : `超支 ${formatMoney(Math.abs(remaining), currency)}`}
+              <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-sm text-slate-500">
+                    {rangeMonths.length > 1 ? `${rangeMonths.length}个月累计支出` : '本月支出'}
+                  </span>
+                  <span className="text-xl font-bold text-slate-800">{formatMoney(spent, currency)}</span>
+                </div>
+                {rangeMonths.length > 1 && (
+                  <div className="flex items-baseline justify-between pt-1 border-t border-slate-200/60">
+                    <span className="text-sm text-slate-500">月均支出</span>
+                    <span className="text-base font-semibold text-slate-600">
+                      {formatMoney(spent / rangeMonths.length, currency)}
                     </span>
                   </div>
-                </div>
-              ) : (
-                <div className="bg-slate-50 rounded-2xl p-4 text-center">
-                  <BarChart3 size={24} className="mx-auto text-slate-400 mb-2" />
-                  <p className="text-sm text-slate-500">本月未设置预算</p>
-                  <p className="text-xs text-slate-400 mt-1">本月已支出 {formatMoney(spent, currency)}</p>
-                </div>
-              )}
+                )}
+                {budget && rangeType === 'month' && (
+                  <>
+                    <div className="pt-2 border-t border-slate-200/60" />
+                    <div className="flex items-baseline justify-between">
+                      <span className="text-sm text-slate-500">本月预算</span>
+                      <span className="text-base font-semibold text-slate-700">{formatMoney(budget.amount, currency)}</span>
+                    </div>
+                    <ProgressBar
+                      value={monthSpent}
+                      max={budget.amount}
+                      color="bg-teal-500"
+                      warningColor="bg-amber-500"
+                      dangerColor="bg-red-500"
+                      height="h-2.5"
+                    />
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-600">
+                        已支出 <span className="font-semibold">{formatMoney(monthSpent, currency)}</span>
+                      </span>
+                      <span className={isOver ? 'text-red-600 font-semibold' : 'text-slate-600'}>
+                        {remaining >= 0 ? `剩余 ${formatMoney(remaining, currency)}` : `超支 ${formatMoney(Math.abs(remaining), currency)}`}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
 
               <div>
                 <h5 className="text-sm font-semibold text-slate-700 mb-3">近6个月执行情况</h5>
@@ -494,11 +604,11 @@ export const Budget = () => {
 
               <div>
                 <h5 className="text-sm font-semibold text-slate-700 mb-3">
-                  本月账单 ({catTxns.length}条)
+                  {rangeMonths.length > 1 ? `${rangeMonths.length}个月账单` : '本月账单'} ({catTxns.length}条)
                 </h5>
                 {catTxns.length === 0 ? (
                   <div className="text-center py-6 text-slate-400 text-sm">
-                    本月暂无相关账单
+                    暂无相关账单
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-64 overflow-y-auto">
@@ -506,7 +616,7 @@ export const Budget = () => {
                       const acc = allAccounts.find((a) => a.id === t.accountId);
                       return (
                         <div key={t.id} className="flex items-center gap-3 py-2 border-b border-slate-50 last:border-0">
-                          <span className="text-xs text-slate-400 w-12">{t.date.slice(5)}</span>
+                          <span className="text-xs text-slate-400 w-14">{t.date.slice(0)}</span>
                           <div className="flex-1 min-w-0">
                             <div className="text-sm text-slate-700 truncate">
                               {t.note || cat.name}

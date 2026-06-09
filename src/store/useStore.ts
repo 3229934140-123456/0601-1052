@@ -179,13 +179,21 @@ export const useStore = create<StoreState>((set, get) => ({
 
   updateCategory: (id, c) => {
     set((state) => {
+      const target = state.categories.find((cat) => cat.id === id);
+      let transactions = state.transactions;
+      if (target && c.type && target.type !== c.type) {
+        transactions = state.transactions.map((t) =>
+          t.categoryId === id ? { ...t, type: c.type as TransactionType } : t
+        );
+      }
       const categories = state.categories.map((item) =>
         item.id === id ? { ...item, ...c } : item
       );
-      const newState = { ...state, categories };
+      const newState = { ...state, categories, transactions };
       saveToStorage(newState);
       return newState;
     });
+    get().recalculateBalances();
   },
 
   deleteCategory: (id) => {
@@ -352,6 +360,27 @@ export const useStore = create<StoreState>((set, get) => ({
     });
   },
 
+  skipRecurringNext: (id) => {
+    const r = get().recurring.find((x) => x.id === id);
+    if (!r) return;
+    get().updateRecurring(id, { nextDate: getNextDate(r.nextDate, r.frequency) });
+  },
+
+  recordRecurringNow: (id) => {
+    const r = get().recurring.find((x) => x.id === id);
+    if (!r) return;
+    get().addTransaction({
+      type: r.type,
+      amount: r.amount,
+      categoryId: r.categoryId,
+      accountId: r.accountId,
+      date: r.nextDate,
+      note: r.note,
+      recurringId: r.id,
+    });
+    get().updateRecurring(id, { nextDate: getNextDate(r.nextDate, r.frequency) });
+  },
+
   processRecurring: () => {
     const state = get();
     const today = todayStr();
@@ -359,6 +388,13 @@ export const useStore = create<StoreState>((set, get) => ({
       (r) => r.active && r.nextDate <= today && (r.type === 'income' || r.type === 'expense')
     );
     dueRecurring.forEach((r) => {
+      const alreadyExists = get().transactions.some(
+        (t) => t.recurringId === r.id && t.date === r.nextDate
+      );
+      if (alreadyExists) {
+        get().updateRecurring(r.id, { nextDate: getNextDate(r.nextDate, r.frequency) });
+        return;
+      }
       get().addTransaction({
         type: r.type,
         amount: r.amount,
@@ -366,6 +402,7 @@ export const useStore = create<StoreState>((set, get) => ({
         accountId: r.accountId,
         date: r.nextDate,
         note: r.note,
+        recurringId: r.id,
       });
       get().updateRecurring(r.id, {
         nextDate: getNextDate(r.nextDate, r.frequency),
