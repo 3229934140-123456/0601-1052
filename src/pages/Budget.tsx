@@ -1,21 +1,23 @@
 import { useState, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Edit2, AlertTriangle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Edit2, AlertTriangle, X, TrendingDown, BarChart3 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { DynamicIcon } from '@/components/DynamicIcon';
 import { ProgressBar } from '@/components/ProgressBar';
 import { Modal } from '@/components/Modal';
 import { PageHeader } from '@/components/Layout/PageHeader';
-import { formatMonthCN, currentMonthStr, getRecentMonths, formatMonth } from '@/utils/date';
+import { formatMonthCN, currentMonthStr, getRecentMonths, formatMonth, formatDateCN } from '@/utils/date';
 import { formatMoney } from '@/utils/money';
 
 export const Budget = () => {
   const [selectedMonth, setSelectedMonth] = useState(currentMonthStr());
   const [showTotalBudgetModal, setShowTotalBudgetModal] = useState(false);
   const [showCategoryBudgetModal, setShowCategoryBudgetModal] = useState<string | null>(null);
+  const [showCategoryDetailModal, setShowCategoryDetailModal] = useState<string | null>(null);
   const [budgetAmount, setBudgetAmount] = useState('');
 
   const transactions = useStore((s) => s.transactions);
   const allCategories = useStore((s) => s.categories);
+  const allAccounts = useStore((s) => s.accounts);
   const budgets = useStore((s) => s.budgets);
 
   const categories = useMemo(
@@ -27,6 +29,7 @@ export const Budget = () => {
   const deleteBudget = useStore((s) => s.deleteBudget);
 
   const monthOptions = getRecentMonths(12);
+  const recent6Months = getRecentMonths(6);
 
   const totalBudget = useMemo(() => {
     return budgets.find((b) => b.month === selectedMonth && b.categoryId === null)?.amount ?? 0;
@@ -51,6 +54,40 @@ export const Budget = () => {
       });
     return map;
   }, [transactions, selectedMonth]);
+
+  const recentMonthStats = useMemo(() => {
+    const stats: Record<string, Record<string, number>> = {};
+    recent6Months.forEach((m) => {
+      stats[m] = {};
+    });
+    transactions
+      .filter((t) => t.type === 'expense' && recent6Months.includes(formatMonth(t.date)))
+      .forEach((t) => {
+        const m = formatMonth(t.date);
+        stats[m][t.categoryId] = (stats[m][t.categoryId] || 0) + t.amount;
+      });
+    return stats;
+  }, [transactions, recent6Months]);
+
+  const getCategoryRecentMonths = (categoryId: string) => {
+    return recent6Months.map((m) => {
+      const budget = budgets.find((b) => b.month === m && b.categoryId === categoryId)?.amount ?? 0;
+      const spent = recentMonthStats[m]?.[categoryId] || 0;
+      return {
+        month: m,
+        budget,
+        spent,
+        remaining: budget - spent,
+        isOver: budget > 0 && spent > budget,
+      };
+    });
+  };
+
+  const getCategoryTransactions = (categoryId: string) => {
+    return transactions
+      .filter((t) => formatMonth(t.date) === selectedMonth && t.categoryId === categoryId)
+      .sort((a, b) => b.date.localeCompare(a.date));
+  };
 
   const totalBudgetFromCategories = categoryBudgets.reduce((sum, b) => sum + b.amount, 0);
 
@@ -200,23 +237,42 @@ export const Budget = () => {
               const spent = categoryExpenses[cat.id] || 0;
               const remaining = (budget?.amount || 0) - spent;
               const isOver = (budget?.amount || 0) > 0 && spent > (budget?.amount || 0);
+              const recentStats = getCategoryRecentMonths(cat.id);
+              const overBudgetCount = recentStats.filter((s) => s.isOver).length;
 
               return (
                 <div key={cat.id} className="group">
-                  <div className="flex items-center gap-3 mb-2">
+                  <div
+                    className="flex items-center gap-3 mb-2 cursor-pointer"
+                    onClick={() => setShowCategoryDetailModal(cat.id)}
+                  >
                     <div
                       className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
                       style={{ backgroundColor: `${cat.color}15`, color: cat.color }}
                     >
                       <DynamicIcon name={cat.icon} size={18} />
                     </div>
-                    <span className="text-sm font-medium text-slate-700 flex-1">{cat.name}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-slate-700">{cat.name}</span>
+                        {overBudgetCount >= 2 && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-500 text-[10px] font-medium">
+                            <TrendingDown size={10} />
+                            近{overBudgetCount}月超支
+                          </span>
+                        )}
+                      </div>
+                    </div>
                     <button
-                      onClick={() => openCategoryBudgetModal(cat.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openCategoryBudgetModal(cat.id);
+                      }}
                       className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all"
                     >
                       {budget ? <Edit2 size={16} /> : <Plus size={16} />}
                     </button>
+                    <ChevronRight size={16} className="text-slate-300" />
                   </div>
 
                   {budget ? (
@@ -241,7 +297,10 @@ export const Budget = () => {
                   ) : (
                     <div className="pl-12">
                       <button
-                        onClick={() => openCategoryBudgetModal(cat.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openCategoryBudgetModal(cat.id);
+                        }}
                         className="w-full py-2 rounded-xl border-2 border-dashed border-slate-200 text-xs text-slate-400 hover:border-teal-300 hover:text-teal-500 transition-colors flex items-center justify-center gap-1"
                       >
                         <Plus size={14} />
@@ -340,6 +399,132 @@ export const Budget = () => {
             </button>
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        open={!!showCategoryDetailModal}
+        onClose={() => setShowCategoryDetailModal(null)}
+        title="预算执行详情"
+      >
+        {showCategoryDetailModal && (() => {
+          const cat = categories.find((c) => c.id === showCategoryDetailModal);
+          if (!cat) return null;
+          const budget = categoryBudgets.find((b) => b.categoryId === cat.id);
+          const spent = categoryExpenses[cat.id] || 0;
+          const remaining = (budget?.amount || 0) - spent;
+          const isOver = (budget?.amount || 0) > 0 && spent > (budget?.amount || 0);
+          const recentStats = getCategoryRecentMonths(cat.id);
+          const catTxns = getCategoryTransactions(cat.id);
+
+          return (
+            <div className="space-y-5">
+              <div className="flex items-center gap-3">
+                <div
+                  className="w-12 h-12 rounded-xl flex items-center justify-center"
+                  style={{ backgroundColor: `${cat.color}15`, color: cat.color }}
+                >
+                  <DynamicIcon name={cat.icon} size={24} />
+                </div>
+                <div>
+                  <div className="font-semibold text-slate-800 text-lg">{cat.name}</div>
+                  <div className="text-xs text-slate-500">{formatMonthCN(selectedMonth)}</div>
+                </div>
+              </div>
+
+              {budget ? (
+                <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-sm text-slate-500">预算</span>
+                    <span className="text-xl font-bold text-slate-800">{formatMoney(budget.amount, currency)}</span>
+                  </div>
+                  <ProgressBar
+                    value={spent}
+                    max={budget.amount}
+                    color="bg-teal-500"
+                    warningColor="bg-amber-500"
+                    dangerColor="bg-red-500"
+                    height="h-2.5"
+                  />
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-600">
+                      已支出 <span className="font-semibold">{formatMoney(spent, currency)}</span>
+                    </span>
+                    <span className={isOver ? 'text-red-600 font-semibold' : 'text-slate-600'}>
+                      {remaining >= 0 ? `剩余 ${formatMoney(remaining, currency)}` : `超支 ${formatMoney(Math.abs(remaining), currency)}`}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-slate-50 rounded-2xl p-4 text-center">
+                  <BarChart3 size={24} className="mx-auto text-slate-400 mb-2" />
+                  <p className="text-sm text-slate-500">本月未设置预算</p>
+                  <p className="text-xs text-slate-400 mt-1">本月已支出 {formatMoney(spent, currency)}</p>
+                </div>
+              )}
+
+              <div>
+                <h5 className="text-sm font-semibold text-slate-700 mb-3">近6个月执行情况</h5>
+                <div className="space-y-2">
+                  {recentStats.map((s) => (
+                    <div key={s.month} className="flex items-center gap-3">
+                      <span className="text-xs text-slate-500 w-16">{formatMonthCN(s.month).slice(5)}</span>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between text-xs mb-1">
+                          <span className="text-slate-600">
+                            {formatMoney(s.spent, currency)}
+                            {s.budget > 0 && <span className="text-slate-400"> / {formatMoney(s.budget, currency)}</span>}
+                          </span>
+                          {s.isOver && <span className="text-red-500 font-medium">超支</span>}
+                          {!s.isOver && s.budget > 0 && <span className="text-teal-600 font-medium">正常</span>}
+                          {s.budget === 0 && <span className="text-slate-400">未设</span>}
+                        </div>
+                        {s.budget > 0 && (
+                          <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${s.isOver ? 'bg-red-500' : 'bg-teal-500'}`}
+                              style={{ width: `${Math.min((s.spent / s.budget) * 100, 100)}%` }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <h5 className="text-sm font-semibold text-slate-700 mb-3">
+                  本月账单 ({catTxns.length}条)
+                </h5>
+                {catTxns.length === 0 ? (
+                  <div className="text-center py-6 text-slate-400 text-sm">
+                    本月暂无相关账单
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {catTxns.map((t) => {
+                      const acc = allAccounts.find((a) => a.id === t.accountId);
+                      return (
+                        <div key={t.id} className="flex items-center gap-3 py-2 border-b border-slate-50 last:border-0">
+                          <span className="text-xs text-slate-400 w-12">{t.date.slice(5)}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm text-slate-700 truncate">
+                              {t.note || cat.name}
+                            </div>
+                            <div className="text-xs text-slate-400">{acc?.name}</div>
+                          </div>
+                          <span className="text-sm font-semibold text-slate-800">
+                            -{formatMoney(t.amount, currency)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
       </Modal>
     </div>
   );

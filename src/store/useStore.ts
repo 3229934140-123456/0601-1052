@@ -14,6 +14,9 @@ import { todayStr, currentMonthStr, getNextDate } from '@/utils/date';
 
 const generateId = (): string => Math.random().toString(36).slice(2, 11);
 
+export const TRANSFER_CATEGORY_ID = 'cat-system-transfer';
+export const ADJUSTMENT_CATEGORY_ID = 'cat-system-adjustment';
+
 const defaultCategories: Category[] = [
   { id: 'cat-food', name: '餐饮', type: 'expense', icon: 'UtensilsCrossed', color: '#F97316', sort: 0 },
   { id: 'cat-transport', name: '交通', type: 'expense', icon: 'Car', color: '#3B82F6', sort: 1 },
@@ -29,6 +32,8 @@ const defaultCategories: Category[] = [
   { id: 'cat-parttime', name: '兼职', type: 'income', icon: 'Clock', color: '#F59E0B', sort: 3 },
   { id: 'cat-redpacket', name: '红包', type: 'income', icon: 'Coins', color: '#EF4444', sort: 4 },
   { id: 'cat-other-inc', name: '其他', type: 'income', icon: 'MoreHorizontal', color: '#6B7280', sort: 5 },
+  { id: TRANSFER_CATEGORY_ID, name: '账户转账', type: 'transfer', icon: 'ArrowRightLeft', color: '#6366F1', sort: 998 },
+  { id: ADJUSTMENT_CATEGORY_ID, name: '余额校准', type: 'adjustment', icon: 'Scale', color: '#8B5CF6', sort: 999 },
 ];
 
 const defaultAccounts: Account[] = [
@@ -58,6 +63,8 @@ interface StoreState extends AppData {
   addAccount: (a: Omit<Account, 'id' | 'sort' | 'balance'> & { balance?: number }) => void;
   updateAccount: (id: string, a: Partial<Account>) => void;
   deleteAccount: (id: string) => void;
+  transferBetweenAccounts: (fromAccountId: string, toAccountId: string, amount: number, date: string, note?: string) => void;
+  adjustAccountBalance: (accountId: string, newBalance: number, note?: string) => void;
   setBudget: (month: string, categoryId: string | null, amount: number) => void;
   deleteBudget: (id: string) => void;
   addRecurring: (r: Omit<Recurring, 'id' | 'nextDate'>) => void;
@@ -76,7 +83,12 @@ interface StoreState extends AppData {
 const getInitialState = (): AppData => {
   const saved = loadFromStorage();
   if (saved) {
-    return saved;
+    const existingCatIds = new Set(saved.categories.map((c) => c.id));
+    const missingSystemCats = defaultCategories.filter((c) => !existingCatIds.has(c.id));
+    return {
+      ...saved,
+      categories: [...saved.categories, ...missingSystemCats],
+    };
   }
   return {
     transactions: [],
@@ -173,6 +185,7 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   deleteCategory: (id) => {
+    if (id === TRANSFER_CATEGORY_ID || id === ADJUSTMENT_CATEGORY_ID) return;
     set((state) => {
       const categories = state.categories.filter((item) => item.id !== id);
       const newState = { ...state, categories };
@@ -207,6 +220,59 @@ export const useStore = create<StoreState>((set, get) => ({
     set((state) => {
       const accounts = state.accounts.filter((item) => item.id !== id);
       const newState = { ...state, accounts };
+      saveToStorage(newState);
+      return newState;
+    });
+  },
+
+  transferBetweenAccounts: (fromAccountId, toAccountId, amount, date, note = '') => {
+    if (fromAccountId === toAccountId || amount <= 0) return;
+    const newT: Transaction = {
+      id: generateId(),
+      type: 'transfer',
+      amount,
+      categoryId: TRANSFER_CATEGORY_ID,
+      accountId: fromAccountId,
+      toAccountId,
+      date,
+      note: note || '账户转账',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    set((state) => {
+      const transactions = [newT, ...state.transactions];
+      const newState = { ...state, transactions };
+      saveToStorage(newState);
+      return newState;
+    });
+    get().recalculateBalances();
+  },
+
+  adjustAccountBalance: (accountId, newBalance, note = '') => {
+    const state = get();
+    const account = state.accounts.find((a) => a.id === accountId);
+    if (!account) return;
+
+    const diff = newBalance - account.balance;
+    if (diff === 0) return;
+
+    const newT: Transaction = {
+      id: generateId(),
+      type: 'adjustment',
+      amount: Math.abs(diff),
+      categoryId: ADJUSTMENT_CATEGORY_ID,
+      accountId,
+      date: todayStr(),
+      note: note || `余额校准：${account.balance.toFixed(2)} → ${newBalance.toFixed(2)} (${diff >= 0 ? '+' : ''}${diff.toFixed(2)})`,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    set((s) => {
+      const transactions = [newT, ...s.transactions];
+      const accounts = s.accounts.map((a) =>
+        a.id === accountId ? { ...a, balance: newBalance } : a
+      );
+      const newState = { ...s, transactions, accounts };
       saveToStorage(newState);
       return newState;
     });
@@ -284,7 +350,7 @@ export const useStore = create<StoreState>((set, get) => ({
     const state = get();
     const today = todayStr();
     const dueRecurring = state.recurring.filter(
-      (r) => r.active && r.nextDate <= today
+      (r) => r.active && r.nextDate <= today && (r.type === 'income' || r.type === 'expense')
     );
     dueRecurring.forEach((r) => {
       get().addTransaction({
@@ -341,6 +407,7 @@ export const useStore = create<StoreState>((set, get) => ({
       saveToStorage(data);
       return { ...data, isUnlocked: true };
     });
+    get().recalculateBalances();
   },
 
   resetAll: () => {
@@ -366,17 +433,62 @@ export const useStore = create<StoreState>((set, get) => ({
         .slice()
         .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt))
         .forEach((t) => {
-          const current = balances.get(t.accountId) ?? 0;
           if (t.type === 'income') {
+            const current = balances.get(t.accountId) ?? 0;
             balances.set(t.accountId, current + t.amount);
-          } else {
+          } else if (t.type === 'expense') {
+            const current = balances.get(t.accountId) ?? 0;
             balances.set(t.accountId, current - t.amount);
+          } else if (t.type === 'transfer') {
+            const fromCurrent = balances.get(t.accountId) ?? 0;
+            balances.set(t.accountId, fromCurrent - t.amount);
+            if (t.toAccountId) {
+              const toCurrent = balances.get(t.toAccountId) ?? 0;
+              balances.set(t.toAccountId, toCurrent + t.amount);
+            }
+          } else if (t.type === 'adjustment') {
+            // adjustment transactions are handled specially - see adjustAccountBalance
+            // we skip them here to avoid double counting
           }
         });
-      const accounts = state.accounts.map((a) => ({
-        ...a,
-        balance: balances.get(a.id) ?? 0,
-      }));
+      const accounts = state.accounts.map((a) => {
+        // Check if there's an adjustment txn for this account - use the latest balance from adjustment
+        const latestAdjustment = state.transactions
+          .filter((t) => t.type === 'adjustment' && t.accountId === a.id)
+          .sort((x, y) => y.date.localeCompare(x.date) || y.createdAt.localeCompare(x.createdAt))[0];
+
+        if (latestAdjustment) {
+          // Find transactions after the adjustment
+          const afterAdjustments = state.transactions
+            .filter((t) =>
+              t.accountId === a.id &&
+              (t.date > latestAdjustment.date ||
+                (t.date === latestAdjustment.date && t.createdAt > latestAdjustment.createdAt))
+            )
+            .sort((x, y) => x.date.localeCompare(y.date) || x.createdAt.localeCompare(y.createdAt));
+
+          let balance = a.balance;
+          // Try to parse the adjustment note to get the target balance
+          const match = latestAdjustment.note.match(/→\s*([-\d.]+)/);
+          if (match) {
+            balance = parseFloat(match[1]);
+          }
+          afterAdjustments.forEach((t) => {
+            if (t.type === 'income') balance += t.amount;
+            else if (t.type === 'expense') balance -= t.amount;
+            else if (t.type === 'transfer') {
+              if (t.accountId === a.id) balance -= t.amount;
+              if (t.toAccountId === a.id) balance += t.amount;
+            }
+          });
+          return { ...a, balance };
+        }
+
+        return {
+          ...a,
+          balance: balances.get(a.id) ?? 0,
+        };
+      });
       const newState = { ...state, accounts };
       saveToStorage(newState);
       return newState;

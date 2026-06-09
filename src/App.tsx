@@ -14,10 +14,12 @@ function AppContent() {
   const isUnlocked = useStore((s) => s.isUnlocked);
   const privacyLockEnabled = useStore((s) => s.settings.privacyLockEnabled);
   const processRecurring = useStore((s) => s.processRecurring);
+  const initialize = useStore((s) => s.initialize);
 
   useEffect(() => {
+    initialize();
     processRecurring();
-  }, [processRecurring]);
+  }, [initialize, processRecurring]);
 
   if (privacyLockEnabled && !isUnlocked) {
     return <LockScreen />;

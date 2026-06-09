@@ -91,8 +91,11 @@ export const Record = () => {
           <div className="inline-flex p-1 bg-white/20 backdrop-blur rounded-2xl mb-6 w-fit self-start">
             <button
               onClick={() => {
-                setType('expense');
-                setCategoryId('');
+                const newType: TransactionType = 'expense';
+                const expenseCats = allCategories.filter((c) => c.type === newType);
+                const currentValid = expenseCats.some((c) => c.id === categoryId);
+                setType(newType);
+                if (!currentValid) setCategoryId('');
               }}
               className={`px-5 py-2 rounded-xl text-sm font-semibold transition-all ${
                 type === 'expense'
@@ -104,8 +107,11 @@ export const Record = () => {
             </button>
             <button
               onClick={() => {
-                setType('income');
-                setCategoryId('');
+                const newType: TransactionType = 'income';
+                const incomeCats = allCategories.filter((c) => c.type === newType);
+                const currentValid = incomeCats.some((c) => c.id === categoryId);
+                setType(newType);
+                if (!currentValid) setCategoryId('');
               }}
               className={`px-5 py-2 rounded-xl text-sm font-semibold transition-all ${
                 type === 'income'

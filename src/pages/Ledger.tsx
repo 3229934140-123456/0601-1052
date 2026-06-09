@@ -67,6 +67,8 @@ export const Ledger = () => {
     return { income, expense, balance: income - expense };
   }, [transactions, selectedMonth]);
 
+  const getAccountName = (id: string) => accounts.find((a) => a.id === id)?.name || '未知账户';
+
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -363,7 +365,32 @@ export const Ledger = () => {
                     {txns.map((t) => {
                       const cat = categories.find((c) => c.id === t.categoryId);
                       const acc = accounts.find((a) => a.id === t.accountId);
+                      const toAcc = t.toAccountId ? accounts.find((a) => a.id === t.toAccountId) : null;
                       const isSelected = selectedIds.has(t.id);
+                      const isTransfer = t.type === 'transfer';
+                      const isAdjustment = t.type === 'adjustment';
+
+                      let displayText = cat?.name || '未知';
+                      let subText = acc?.name || '未知账户';
+                      let amountText = '';
+                      let amountClass = 'text-slate-800';
+
+                      if (isTransfer) {
+                        displayText = `${acc?.name || '?'} → ${toAcc?.name || '?'}`;
+                        subText = t.note || '账户转账';
+                        amountText = formatMoney(t.amount, currency);
+                        amountClass = 'text-indigo-600';
+                      } else if (isAdjustment) {
+                        displayText = '余额校准';
+                        subText = t.note || acc?.name || '';
+                        amountText = formatMoney(t.amount, currency);
+                        amountClass = 'text-violet-600';
+                      } else if (t.type === 'income') {
+                        amountText = `+${formatMoney(t.amount, currency)}`;
+                        amountClass = 'text-emerald-600';
+                      } else {
+                        amountText = `-${formatMoney(t.amount, currency)}`;
+                      }
 
                       return (
                         <div
@@ -390,27 +417,29 @@ export const Ledger = () => {
 
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium text-slate-800 truncate">{cat?.name || '未知'}</span>
-                              {t.note && (
+                              <span className="text-sm font-medium text-slate-800 truncate">{displayText}</span>
+                              {!isTransfer && !isAdjustment && t.note && (
                                 <span className="text-xs text-slate-400 truncate">· {t.note}</span>
                               )}
                             </div>
-                            <div className="text-xs text-slate-400 mt-0.5">{acc?.name || '未知账户'}</div>
+                            <div className="text-xs text-slate-400 mt-0.5">{subText}</div>
                           </div>
 
                           <div className="text-right shrink-0">
-                            <div className={`text-sm font-bold ${t.type === 'income' ? 'text-emerald-600' : 'text-slate-800'}`}>
-                              {t.type === 'income' ? '+' : '-'}{formatMoney(t.amount, currency)}
+                            <div className={`text-sm font-bold ${amountClass}`}>
+                              {amountText}
                             </div>
                           </div>
 
                           <div className="flex items-center gap-1 shrink-0">
-                            <button
-                              onClick={() => setEditingTransaction(t)}
-                              className="p-2 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
-                            >
-                              <Edit size={16} />
-                            </button>
+                            {!isTransfer && !isAdjustment && (
+                              <button
+                                onClick={() => setEditingTransaction(t)}
+                                className="p-2 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+                              >
+                                <Edit size={16} />
+                              </button>
+                            )}
                             <button
                               onClick={() => {
                                 if (confirm('确定要删除这条记录吗？')) {
@@ -519,7 +548,7 @@ export const Ledger = () => {
 
 interface EditFormProps {
   transaction: Transaction;
-  categories: { id: string; name: string; type: TransactionType; icon: string; color: string }[];
+  categories: { id: string; name: string; type: TransactionType; icon: string; color: string; sort: number }[];
   accounts: { id: string; name: string; icon: string; color: string }[];
   currency: string;
   onSave: (t: Transaction) => void;
@@ -529,11 +558,21 @@ interface EditFormProps {
 const EditTransactionForm = ({ transaction, categories, accounts, currency, onSave, onCancel }: EditFormProps) => {
   const [t, setT] = useState<Transaction>(transaction);
 
+  const handleTypeChange = (type: TransactionType) => {
+    const sameTypeCategories = categories.filter((c) => c.type === type).sort((a, b) => a.sort - b.sort);
+    const currentCategoryValid = sameTypeCategories.some((c) => c.id === t.categoryId);
+    setT({
+      ...t,
+      type,
+      categoryId: currentCategoryValid ? t.categoryId : sameTypeCategories[0]?.id || '',
+    });
+  };
+
   return (
     <div className="space-y-4">
       <div className="inline-flex p-1 bg-slate-100 rounded-xl">
         <button
-          onClick={() => setT({ ...t, type: 'expense' })}
+          onClick={() => handleTypeChange('expense')}
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
             t.type === 'expense' ? 'bg-white shadow text-red-600' : 'text-slate-600'
           }`}
@@ -541,7 +580,7 @@ const EditTransactionForm = ({ transaction, categories, accounts, currency, onSa
           支出
         </button>
         <button
-          onClick={() => setT({ ...t, type: 'income' })}
+          onClick={() => handleTypeChange('income')}
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
             t.type === 'income' ? 'bg-white shadow text-emerald-600' : 'text-slate-600'
           }`}

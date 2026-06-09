@@ -70,7 +70,6 @@ export const Statistics = () => {
 
   const accountData = useMemo(() => {
     return accounts
-      .filter((a) => a.balance !== 0)
       .map((a) => ({
         name: a.name,
         value: Math.round(a.balance),
@@ -80,28 +79,49 @@ export const Statistics = () => {
       .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
   }, [accounts]);
 
-  const totalAssets = accountData.filter((a) => a.value > 0).reduce((sum, a) => sum + a.value, 0);
-  const totalLiabilities = accountData.filter((a) => a.value < 0).reduce((sum, a) => sum + Math.abs(a.value), 0);
+  const totalAssets = accounts.filter((a) => a.balance > 0).reduce((sum, a) => sum + a.balance, 0);
+  const totalLiabilities = accounts.filter((a) => a.balance < 0).reduce((sum, a) => sum + Math.abs(a.balance), 0);
   const netWorth = totalAssets - totalLiabilities;
 
   const netWorthData = useMemo(() => {
-    let runningBalance = 0;
     const monthBalances: Record<string, number> = {};
+
+    const accountMonthBalances: Record<string, Record<string, number>> = {};
+    accounts.forEach((a) => {
+      accountMonthBalances[a.id] = {};
+    });
 
     transactions
       .slice()
-      .sort((a, b) => a.date.localeCompare(b.date))
+      .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt))
       .forEach((t) => {
         const month = formatMonth(t.date);
-        runningBalance += t.type === 'income' ? t.amount : -t.amount;
-        monthBalances[month] = runningBalance;
+        if (!accountMonthBalances[t.accountId]) accountMonthBalances[t.accountId] = {};
+        const prev = accountMonthBalances[t.accountId];
+        const prevKeys = Object.keys(prev);
+        const lastBalance = prevKeys.length > 0 ? prev[prevKeys.sort()[prevKeys.length - 1]] : 0;
+        prev[month] = lastBalance + (t.type === 'income' ? t.amount : -t.amount);
       });
 
-    return recentMonths.map((month) => ({
-      month: formatMonthCN(month).slice(5),
-      净资产: Math.round(monthBalances[month] || (recentMonths.indexOf(month) === 0 ? 0 : 0)),
-    }));
-  }, [transactions, recentMonths]);
+    let lastNetWorth = 0;
+    return recentMonths.map((month) => {
+      let monthTotal = 0;
+      accounts.forEach((a) => {
+        const mBalances = accountMonthBalances[a.id] || {};
+        const months = Object.keys(mBalances).sort();
+        const lastMonthForAccount = months.filter((m) => m <= month).pop();
+        monthTotal += lastMonthForAccount ? mBalances[lastMonthForAccount] : 0;
+      });
+      if (monthTotal === 0 && lastNetWorth !== 0) {
+        monthTotal = lastNetWorth;
+      }
+      lastNetWorth = monthTotal;
+      return {
+        month: formatMonthCN(month).slice(5),
+        净资产: Math.round(monthTotal),
+      };
+    });
+  }, [transactions, recentMonths, accounts]);
 
   const tabs: { key: TabType; label: string }[] = [
     { key: 'trend', label: '收支趋势' },

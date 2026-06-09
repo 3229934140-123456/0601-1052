@@ -2,7 +2,7 @@ import { useState, useRef, useMemo } from 'react';
 import {
   ChevronRight, Plus, Edit2, Trash2, Tag, Wallet, RefreshCcw,
   Download, Upload, Lock, Unlock, AlertTriangle, Check, Eye, EyeOff,
-  RefreshCw,
+  RefreshCw, ArrowRightLeft, Scale, History, X,
 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { DynamicIcon } from '@/components/DynamicIcon';
@@ -559,16 +559,44 @@ const AccountsSection = ({ onClose }: SectionProps) => {
   const [editColor, setEditColor] = useState('#6B7280');
   const [editType, setEditType] = useState<'cash' | 'bank' | 'wechat' | 'alipay' | 'other'>('cash');
 
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferFromId, setTransferFromId] = useState('');
+  const [transferToId, setTransferToId] = useState('');
+  const [transferAmount, setTransferAmount] = useState('');
+  const [transferDate, setTransferDate] = useState(todayStr());
+  const [transferNote, setTransferNote] = useState('');
+
+  const [showAdjustModal, setShowAdjustModal] = useState(false);
+  const [adjustAccountId, setAdjustAccountId] = useState('');
+  const [adjustNewBalance, setAdjustNewBalance] = useState('');
+  const [adjustNote, setAdjustNote] = useState('');
+
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historyAccountId, setHistoryAccountId] = useState<string | null>(null);
+
   const allAccounts = useStore((s) => s.accounts);
+  const allTransactions = useStore((s) => s.transactions);
   const currency = useStore((s) => s.settings.currency);
   const addAccount = useStore((s) => s.addAccount);
   const updateAccount = useStore((s) => s.updateAccount);
   const deleteAccount = useStore((s) => s.deleteAccount);
+  const transferBetweenAccounts = useStore((s) => s.transferBetweenAccounts);
+  const adjustAccountBalance = useStore((s) => s.adjustAccountBalance);
 
   const accounts = useMemo(
     () => [...allAccounts].sort((a, b) => a.sort - b.sort),
     [allAccounts]
   );
+
+  const accountHistory = useMemo(() => {
+    if (!historyAccountId) return [];
+    return allTransactions
+      .filter((t) =>
+        (t.type === 'adjustment' && t.accountId === historyAccountId) ||
+        (t.type === 'transfer' && (t.accountId === historyAccountId || t.toAccountId === historyAccountId))
+      )
+      .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+  }, [allTransactions, historyAccountId]);
 
   const openNew = () => {
     setIsNew(true);
@@ -605,6 +633,51 @@ const AccountsSection = ({ onClose }: SectionProps) => {
     }
   };
 
+  const openTransfer = (fromAccountId?: string) => {
+    setTransferFromId(fromAccountId || accounts[0]?.id || '');
+    const otherAccounts = accounts.filter((a) => a.id !== transferFromId);
+    setTransferToId(otherAccounts[0]?.id || '');
+    setTransferAmount('');
+    setTransferDate(todayStr());
+    setTransferNote('');
+    setShowTransferModal(true);
+  };
+
+  const handleTransfer = () => {
+    const amount = parseFloat(transferAmount);
+    if (!transferFromId || !transferToId || !amount || amount <= 0) return;
+    if (transferFromId === transferToId) {
+      alert('转出和转入账户不能相同');
+      return;
+    }
+    transferBetweenAccounts(transferFromId, transferToId, amount, transferDate, transferNote);
+    setShowTransferModal(false);
+  };
+
+  const openAdjust = (accountId: string) => {
+    const acc = accounts.find((a) => a.id === accountId);
+    if (!acc) return;
+    setAdjustAccountId(accountId);
+    setAdjustNewBalance(acc.balance.toString());
+    setAdjustNote('');
+    setShowAdjustModal(true);
+  };
+
+  const handleAdjust = () => {
+    const newBalance = parseFloat(adjustNewBalance);
+    if (!adjustAccountId || isNaN(newBalance)) return;
+    adjustAccountBalance(adjustAccountId, newBalance, adjustNote);
+    setShowAdjustModal(false);
+  };
+
+  const openHistory = (accountId: string) => {
+    setHistoryAccountId(accountId);
+    setShowHistoryModal(true);
+  };
+
+  const getAccountName = (id: string) => accounts.find((a) => a.id === id)?.name || '未知账户';
+  const historyAccount = historyAccountId ? accounts.find((a) => a.id === historyAccountId) : null;
+
   return (
     <Modal
       open={true}
@@ -613,7 +686,14 @@ const AccountsSection = ({ onClose }: SectionProps) => {
       maxWidth="max-w-xl"
     >
       <div className="space-y-4">
-        <div className="flex justify-end">
+        <div className="flex gap-2 justify-end">
+          <button
+            onClick={() => openTransfer()}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-500 text-white text-sm font-medium hover:bg-indigo-600 transition-colors"
+          >
+            <ArrowRightLeft size={16} />
+            <span>账户转账</span>
+          </button>
           <button
             onClick={openNew}
             className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-teal-500 text-white text-sm font-medium hover:bg-teal-600 transition-colors"
@@ -627,32 +707,57 @@ const AccountsSection = ({ onClose }: SectionProps) => {
           {accounts.map((acc) => (
             <div
               key={acc.id}
-              className="group flex items-center gap-3 p-4 rounded-2xl bg-slate-50 hover:bg-slate-100 transition-colors"
+              className="p-4 rounded-2xl bg-slate-50 hover:bg-slate-100 transition-colors"
             >
-              <div
-                className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
-                style={{ backgroundColor: `${acc.color}20`, color: acc.color }}
-              >
-                <DynamicIcon name={acc.icon} size={22} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-slate-800">{acc.name}</div>
-                <div className="text-xs text-slate-500 mt-0.5">
-                  余额: <span className={acc.balance >= 0 ? 'text-slate-700' : 'text-red-500'}>{formatMoney(acc.balance, currency)}</span>
+              <div className="flex items-center gap-3">
+                <div
+                  className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
+                  style={{ backgroundColor: `${acc.color}20`, color: acc.color }}
+                >
+                  <DynamicIcon name={acc.icon} size={22} />
                 </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold text-slate-800">{acc.name}</div>
+                  <div className="text-xs text-slate-500 mt-0.5">
+                    余额: <span className={acc.balance >= 0 ? 'text-slate-700 font-medium' : 'text-red-500 font-medium'}>{formatMoney(acc.balance, currency)}</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => openHistory(acc.id)}
+                  className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-white transition-colors"
+                  title="调整记录"
+                >
+                  <History size={18} />
+                </button>
+                <button
+                  onClick={() => openAdjust(acc.id)}
+                  className="p-2 rounded-xl text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-colors"
+                  title="余额校准"
+                >
+                  <Scale size={18} />
+                </button>
+                <button
+                  onClick={() => openTransfer(acc.id)}
+                  className="p-2 rounded-xl text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                  title="转出"
+                >
+                  <ArrowRightLeft size={18} />
+                </button>
+                <button
+                  onClick={() => openEdit(acc)}
+                  className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-white transition-colors"
+                  title="编辑"
+                >
+                  <Edit2 size={18} />
+                </button>
+                <button
+                  onClick={() => handleDelete(acc)}
+                  className="p-2 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                  title="删除"
+                >
+                  <Trash2 size={18} />
+                </button>
               </div>
-              <button
-                onClick={() => openEdit(acc)}
-                className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-white transition-colors"
-              >
-                <Edit2 size={18} />
-              </button>
-              <button
-                onClick={() => handleDelete(acc)}
-                className="p-2 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-              >
-                <Trash2 size={18} />
-              </button>
             </div>
           ))}
         </div>
@@ -747,6 +852,257 @@ const AccountsSection = ({ onClose }: SectionProps) => {
                 保存
               </button>
             </div>
+          </div>
+        </Modal>
+      )}
+
+      {showTransferModal && (
+        <Modal
+          open={true}
+          onClose={() => setShowTransferModal(false)}
+          title="账户转账"
+        >
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">转出账户</label>
+                <select
+                  value={transferFromId}
+                  onChange={(e) => setTransferFromId(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-slate-50 border-none text-sm outline-none focus:bg-slate-100"
+                >
+                  <option value="">请选择</option>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} ({formatMoney(a.balance, currency)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">转入账户</label>
+                <select
+                  value={transferToId}
+                  onChange={(e) => setTransferToId(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-slate-50 border-none text-sm outline-none focus:bg-slate-100"
+                >
+                  <option value="">请选择</option>
+                  {accounts
+                    .filter((a) => a.id !== transferFromId)
+                    .map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name} ({formatMoney(a.balance, currency)})
+                      </option>
+                    ))}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">转账金额</label>
+              <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-slate-50">
+                <span className="text-slate-500">{currency}</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={transferAmount}
+                  onChange={(e) => setTransferAmount(e.target.value)}
+                  placeholder="0.00"
+                  className="flex-1 bg-transparent text-lg font-bold outline-none"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">日期</label>
+              <input
+                type="date"
+                value={transferDate}
+                onChange={(e) => setTransferDate(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl bg-slate-50 border-none text-sm outline-none focus:bg-slate-100"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">备注</label>
+              <input
+                type="text"
+                value={transferNote}
+                onChange={(e) => setTransferNote(e.target.value)}
+                placeholder="可选，如：取现、还款等"
+                className="w-full px-4 py-3 rounded-xl bg-slate-50 border-none text-sm outline-none focus:bg-slate-100"
+              />
+            </div>
+
+            <div className="text-xs text-slate-500 bg-slate-50 rounded-xl p-3">
+              转账不会产生收入或支出，仅调整两个账户的余额和净资产。
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setShowTransferModal(false)}
+                className="flex-1 py-3 rounded-xl bg-slate-100 text-slate-700 font-medium hover:bg-slate-200 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleTransfer}
+                disabled={!transferFromId || !transferToId || !transferAmount || parseFloat(transferAmount) <= 0 || transferFromId === transferToId}
+                className="flex-1 py-3 rounded-xl bg-indigo-500 text-white font-medium hover:bg-indigo-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                确认转账
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {showAdjustModal && (
+        <Modal
+          open={true}
+          onClose={() => setShowAdjustModal(false)}
+          title="余额校准"
+        >
+          <div className="space-y-4">
+            {(() => {
+              const acc = accounts.find((a) => a.id === adjustAccountId);
+              if (!acc) return null;
+              const newBal = parseFloat(adjustNewBalance);
+              const diff = isNaN(newBal) ? 0 : newBal - acc.balance;
+              return (
+                <>
+                  <div className="bg-slate-50 rounded-xl p-4">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+                        style={{ backgroundColor: `${acc.color}20`, color: acc.color }}
+                      >
+                        <DynamicIcon name={acc.icon} size={20} />
+                      </div>
+                      <div className="flex-1">
+                        <div className="text-sm font-semibold text-slate-800">{acc.name}</div>
+                        <div className="text-xs text-slate-500 mt-0.5">
+                          当前余额: <span className="font-medium text-slate-700">{formatMoney(acc.balance, currency)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">校准后余额</label>
+                    <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-slate-50">
+                      <span className="text-slate-500">{currency}</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={adjustNewBalance}
+                        onChange={(e) => setAdjustNewBalance(e.target.value)}
+                        placeholder="0.00"
+                        className="flex-1 bg-transparent text-lg font-bold outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {!isNaN(newBal) && diff !== 0 && (
+                    <div className={`text-sm rounded-xl p-3 ${diff > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                      差额: {diff > 0 ? '+' : ''}{formatMoney(diff, currency)}
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">调整原因（可选）</label>
+                    <input
+                      type="text"
+                      value={adjustNote}
+                      onChange={(e) => setAdjustNote(e.target.value)}
+                      placeholder="如：银行月结、现金盘点等"
+                      className="w-full px-4 py-3 rounded-xl bg-slate-50 border-none text-sm outline-none focus:bg-slate-100"
+                    />
+                  </div>
+
+                  <div className="text-xs text-slate-500 bg-slate-50 rounded-xl p-3">
+                    校准会生成一条调整记录，方便以后追溯余额变化原因。
+                  </div>
+                </>
+              );
+            })()}
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setShowAdjustModal(false)}
+                className="flex-1 py-3 rounded-xl bg-slate-100 text-slate-700 font-medium hover:bg-slate-200 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleAdjust}
+                disabled={!adjustAccountId || adjustNewBalance === '' || isNaN(parseFloat(adjustNewBalance))}
+                className="flex-1 py-3 rounded-xl bg-violet-500 text-white font-medium hover:bg-violet-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                确认校准
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {showHistoryModal && historyAccount && (
+        <Modal
+          open={true}
+          onClose={() => {
+            setShowHistoryModal(false);
+            setHistoryAccountId(null);
+          }}
+          title={`${historyAccount.name} - 调整记录`}
+        >
+          <div className="space-y-3">
+            {accountHistory.length === 0 ? (
+              <div className="text-center py-12 text-slate-400">
+                <History size={36} className="mx-auto mb-3 opacity-50" />
+                <p className="text-sm">暂无调整记录</p>
+                <p className="text-xs mt-1">余额校准和账户转账都会在这里显示</p>
+              </div>
+            ) : (
+              accountHistory.map((t) => {
+                if (t.type === 'transfer') {
+                  const isOut = t.accountId === historyAccountId;
+                  return (
+                    <div key={t.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50">
+                      <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600 shrink-0">
+                        <ArrowRightLeft size={20} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-slate-800">
+                          {isOut ? `转出至 ${getAccountName(t.toAccountId || '')}` : `从 ${getAccountName(t.accountId)} 转入`}
+                        </div>
+                        <div className="text-xs text-slate-500 mt-0.5">
+                          {formatDateCN(t.date)}
+                          {t.note && t.note !== '账户转账' ? ` · ${t.note}` : ''}
+                        </div>
+                      </div>
+                      <div className={`text-sm font-semibold ${isOut ? 'text-slate-700' : 'text-emerald-600'}`}>
+                        {isOut ? '-' : '+'}{formatMoney(t.amount, currency)}
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={t.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50">
+                    <div className="w-10 h-10 rounded-xl bg-violet-50 flex items-center justify-center text-violet-600 shrink-0">
+                      <Scale size={20} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-slate-800">余额校准</div>
+                      <div className="text-xs text-slate-500 mt-0.5">
+                        {formatDateCN(t.date)}
+                        {t.note ? ` · ${t.note}` : ''}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </Modal>
       )}
