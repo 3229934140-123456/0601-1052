@@ -3,7 +3,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend, BarChart, Bar,
 } from 'recharts';
-import { useStore } from '@/store/useStore';
+import { useStore, calculateAccountBalancesUpToMonth } from '@/store/useStore';
 import { DynamicIcon } from '@/components/DynamicIcon';
 import { PageHeader } from '@/components/Layout/PageHeader';
 import { formatMonth, formatMonthCN, getRecentMonths } from '@/utils/date';
@@ -84,33 +84,12 @@ export const Statistics = () => {
   const netWorth = totalAssets - totalLiabilities;
 
   const netWorthData = useMemo(() => {
-    const monthBalances: Record<string, number> = {};
-
-    const accountMonthBalances: Record<string, Record<string, number>> = {};
-    accounts.forEach((a) => {
-      accountMonthBalances[a.id] = {};
-    });
-
-    transactions
-      .slice()
-      .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt))
-      .forEach((t) => {
-        const month = formatMonth(t.date);
-        if (!accountMonthBalances[t.accountId]) accountMonthBalances[t.accountId] = {};
-        const prev = accountMonthBalances[t.accountId];
-        const prevKeys = Object.keys(prev);
-        const lastBalance = prevKeys.length > 0 ? prev[prevKeys.sort()[prevKeys.length - 1]] : 0;
-        prev[month] = lastBalance + (t.type === 'income' ? t.amount : -t.amount);
-      });
-
     let lastNetWorth = 0;
     return recentMonths.map((month) => {
+      const monthBalances = calculateAccountBalancesUpToMonth(accounts, transactions, month);
       let monthTotal = 0;
       accounts.forEach((a) => {
-        const mBalances = accountMonthBalances[a.id] || {};
-        const months = Object.keys(mBalances).sort();
-        const lastMonthForAccount = months.filter((m) => m <= month).pop();
-        monthTotal += lastMonthForAccount ? mBalances[lastMonthForAccount] : 0;
+        monthTotal += monthBalances[a.id] ?? 0;
       });
       if (monthTotal === 0 && lastNetWorth !== 0) {
         monthTotal = lastNetWorth;
@@ -121,7 +100,7 @@ export const Statistics = () => {
         净资产: Math.round(monthTotal),
       };
     });
-  }, [transactions, recentMonths, accounts]);
+  }, [accounts, transactions, recentMonths]);
 
   const tabs: { key: TabType; label: string }[] = [
     { key: 'trend', label: '收支趋势' },

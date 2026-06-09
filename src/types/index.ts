@@ -12,6 +12,8 @@ export interface Transaction {
   image?: string;
   createdAt: string;
   updatedAt: string;
+  adjustmentTargetBalance?: number;
+  adjustmentDiff?: number;
 }
 
 export interface Category {

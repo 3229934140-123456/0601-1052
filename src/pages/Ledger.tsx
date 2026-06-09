@@ -381,9 +381,19 @@ export const Ledger = () => {
                         amountText = formatMoney(t.amount, currency);
                         amountClass = 'text-indigo-600';
                       } else if (isAdjustment) {
-                        displayText = '余额校准';
-                        subText = t.note || acc?.name || '';
-                        amountText = formatMoney(t.amount, currency);
+                        const diff = typeof t.adjustmentDiff === 'number'
+                          ? t.adjustmentDiff
+                          : (() => {
+                              const match = t.note.match(/[（(]\s*([+-]?\d+\.?\d*)\s*[)）]/) || t.note.match(/→\s*([-\d.]+)/);
+                              if (match && typeof t.adjustmentTargetBalance === 'number') {
+                                return t.adjustmentTargetBalance > 0 ? t.amount : -t.amount;
+                              }
+                              return 0;
+                            })();
+                        const hasCustomNote = t.note && !t.note.includes('余额校准：') && !t.note.includes('→');
+                        displayText = `余额校准 ${diff >= 0 ? '+' : ''}${formatMoney(diff, currency)}`;
+                        subText = hasCustomNote ? `${acc?.name || '未知账户'} · ${t.note}` : `${acc?.name || '未知账户'}${typeof t.adjustmentTargetBalance === 'number' ? ` → ${formatMoney(t.adjustmentTargetBalance, currency)}` : ''}`;
+                        amountText = '';
                         amountClass = 'text-violet-600';
                       } else if (t.type === 'income') {
                         amountText = `+${formatMoney(t.amount, currency)}`;

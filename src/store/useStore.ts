@@ -100,15 +100,19 @@ const getInitialState = (): AppData => {
   };
 };
 
+const getInitialIsUnlocked = (): boolean => {
+  const saved = loadFromStorage();
+  if (saved && saved.settings.privacyLockEnabled) {
+    return false;
+  }
+  return true;
+};
+
 export const useStore = create<StoreState>((set, get) => ({
   ...getInitialState(),
-  isUnlocked: true,
+  isUnlocked: getInitialIsUnlocked(),
 
   initialize: () => {
-    const state = get();
-    if (state.settings.privacyLockEnabled) {
-      set({ isUnlocked: false });
-    }
     get().processRecurring();
   },
 
@@ -264,6 +268,8 @@ export const useStore = create<StoreState>((set, get) => ({
       accountId,
       date: todayStr(),
       note: note || `余额校准：${account.balance.toFixed(2)} → ${newBalance.toFixed(2)} (${diff >= 0 ? '+' : ''}${diff.toFixed(2)})`,
+      adjustmentTargetBalance: newBalance,
+      adjustmentDiff: diff,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -429,66 +435,43 @@ export const useStore = create<StoreState>((set, get) => ({
     set((state) => {
       const balances = new Map<string, number>();
       state.accounts.forEach((a) => balances.set(a.id, 0));
-      state.transactions
+
+      const sortedTxns = state.transactions
         .slice()
-        .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt))
-        .forEach((t) => {
-          if (t.type === 'income') {
-            const current = balances.get(t.accountId) ?? 0;
-            balances.set(t.accountId, current + t.amount);
-          } else if (t.type === 'expense') {
-            const current = balances.get(t.accountId) ?? 0;
-            balances.set(t.accountId, current - t.amount);
-          } else if (t.type === 'transfer') {
-            const fromCurrent = balances.get(t.accountId) ?? 0;
-            balances.set(t.accountId, fromCurrent - t.amount);
-            if (t.toAccountId) {
-              const toCurrent = balances.get(t.toAccountId) ?? 0;
-              balances.set(t.toAccountId, toCurrent + t.amount);
-            }
-          } else if (t.type === 'adjustment') {
-            // adjustment transactions are handled specially - see adjustAccountBalance
-            // we skip them here to avoid double counting
-          }
-        });
-      const accounts = state.accounts.map((a) => {
-        // Check if there's an adjustment txn for this account - use the latest balance from adjustment
-        const latestAdjustment = state.transactions
-          .filter((t) => t.type === 'adjustment' && t.accountId === a.id)
-          .sort((x, y) => y.date.localeCompare(x.date) || y.createdAt.localeCompare(x.createdAt))[0];
+        .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt));
 
-        if (latestAdjustment) {
-          // Find transactions after the adjustment
-          const afterAdjustments = state.transactions
-            .filter((t) =>
-              t.accountId === a.id &&
-              (t.date > latestAdjustment.date ||
-                (t.date === latestAdjustment.date && t.createdAt > latestAdjustment.createdAt))
-            )
-            .sort((x, y) => x.date.localeCompare(y.date) || x.createdAt.localeCompare(y.createdAt));
-
-          let balance = a.balance;
-          // Try to parse the adjustment note to get the target balance
-          const match = latestAdjustment.note.match(/→\s*([-\d.]+)/);
-          if (match) {
-            balance = parseFloat(match[1]);
+      sortedTxns.forEach((t) => {
+        if (t.type === 'income') {
+          const current = balances.get(t.accountId) ?? 0;
+          balances.set(t.accountId, current + t.amount);
+        } else if (t.type === 'expense') {
+          const current = balances.get(t.accountId) ?? 0;
+          balances.set(t.accountId, current - t.amount);
+        } else if (t.type === 'transfer') {
+          const fromCurrent = balances.get(t.accountId) ?? 0;
+          balances.set(t.accountId, fromCurrent - t.amount);
+          if (t.toAccountId) {
+            const toCurrent = balances.get(t.toAccountId) ?? 0;
+            balances.set(t.toAccountId, toCurrent + t.amount);
           }
-          afterAdjustments.forEach((t) => {
-            if (t.type === 'income') balance += t.amount;
-            else if (t.type === 'expense') balance -= t.amount;
-            else if (t.type === 'transfer') {
-              if (t.accountId === a.id) balance -= t.amount;
-              if (t.toAccountId === a.id) balance += t.amount;
-            }
-          });
-          return { ...a, balance };
+        } else if (t.type === 'adjustment') {
+          let target: number | null = null;
+          if (typeof t.adjustmentTargetBalance === 'number') {
+            target = t.adjustmentTargetBalance;
+          } else {
+            const match = t.note.match(/→\s*([-\d.]+)/);
+            if (match) target = parseFloat(match[1]);
+          }
+          if (target !== null && !isNaN(target)) {
+            balances.set(t.accountId, target);
+          }
         }
-
-        return {
-          ...a,
-          balance: balances.get(a.id) ?? 0,
-        };
       });
+
+      const accounts = state.accounts.map((a) => ({
+        ...a,
+        balance: balances.get(a.id) ?? 0,
+      }));
       const newState = { ...state, accounts };
       saveToStorage(newState);
       return newState;
@@ -504,3 +487,51 @@ export const getCategoriesByType = (type: TransactionType): Category[] => {
 };
 
 export const getMonthKey = (): string => currentMonthStr();
+
+export interface AccountBalanceAtMonth {
+  [accountId: string]: number;
+}
+
+export const calculateAccountBalancesUpToMonth = (
+  accounts: { id: string }[],
+  transactions: Transaction[],
+  upToMonthInclusive: string
+): AccountBalanceAtMonth => {
+  const balances: AccountBalanceAtMonth = {};
+  accounts.forEach((a) => {
+    balances[a.id] = 0;
+  });
+
+  transactions
+    .slice()
+    .filter((t) => {
+      const m = t.date.slice(0, 7);
+      return m <= upToMonthInclusive;
+    })
+    .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt))
+    .forEach((t) => {
+      if (t.type === 'income') {
+        balances[t.accountId] = (balances[t.accountId] ?? 0) + t.amount;
+      } else if (t.type === 'expense') {
+        balances[t.accountId] = (balances[t.accountId] ?? 0) - t.amount;
+      } else if (t.type === 'transfer') {
+        balances[t.accountId] = (balances[t.accountId] ?? 0) - t.amount;
+        if (t.toAccountId) {
+          balances[t.toAccountId] = (balances[t.toAccountId] ?? 0) + t.amount;
+        }
+      } else if (t.type === 'adjustment') {
+        let target: number | null = null;
+        if (typeof t.adjustmentTargetBalance === 'number') {
+          target = t.adjustmentTargetBalance;
+        } else {
+          const match = t.note.match(/→\s*([-\d.]+)/);
+          if (match) target = parseFloat(match[1]);
+        }
+        if (target !== null && !isNaN(target)) {
+          balances[t.accountId] = target;
+        }
+      }
+    });
+
+  return balances;
+};

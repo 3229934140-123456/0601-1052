@@ -348,7 +348,12 @@ const CategoriesSection = ({ onClose }: SectionProps) => {
     if (isNew) {
       addCategory({ name: editName.trim(), type: editType, icon: editIcon, color: editColor });
     } else if (editingCategory) {
-      updateCategory(editingCategory.id, { name: editName.trim(), icon: editIcon, color: editColor });
+      if (editingCategory.type !== editType) {
+        if (!confirm(`切换分类类型后，已使用该分类的账单也会变为"${editType === 'income' ? '收入' : '支出'}"类型，确定继续吗？`)) {
+          return;
+        }
+      }
+      updateCategory(editingCategory.id, { name: editName.trim(), icon: editIcon, color: editColor, type: editType });
     }
     setEditingCategory(null);
     setIsNew(false);
