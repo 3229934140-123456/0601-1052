@@ -134,6 +134,28 @@ export const Statistics = () => {
     });
   }, [accounts, transactions, recentMonths]);
 
+  const ACCOUNT_TYPE_META = {
+    cash: { label: '现金', color: '#F97316' },
+    bank: { label: '银行卡', color: '#3B82F6' },
+    wechat: { label: '微信', color: '#10B981' },
+    alipay: { label: '支付宝', color: '#06B6D4' },
+    other: { label: '其他', color: '#6B7280' },
+  } as const;
+
+  const accountTypeTrend = useMemo(() => {
+    return recentMonths.map((month) => {
+      const balances = calculateAccountBalancesUpToMonth(accounts, transactions, month);
+      const row: Record<string, number | string> = { month: formatMonthCN(month).slice(5) };
+      (Object.keys(ACCOUNT_TYPE_META) as (keyof typeof ACCOUNT_TYPE_META)[]).forEach((type) => {
+        const total = accounts
+          .filter((a) => a.type === type)
+          .reduce((sum, a) => sum + (balances[a.id] ?? 0), 0);
+        row[ACCOUNT_TYPE_META[type].label] = Math.round(total);
+      });
+      return row;
+    });
+  }, [accounts, transactions, recentMonths]);
+
   const ACCOUNT_TREND_COLORS = ['#0D9488', '#F97316', '#8B5CF6', '#EC4899', '#6366F1', '#10B981', '#06B6D4', '#F59E0B'];
 
   const tabs: { key: TabType; label: string }[] = [
@@ -465,6 +487,41 @@ export const Statistics = () => {
                 </div>
               </div>
             )}
+
+            <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
+              <h4 className="font-semibold text-slate-800 mb-4">资产类型近6个月变化趋势</h4>
+              <div className="h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={accountTypeTrend} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                    <XAxis dataKey="month" tick={{ fill: '#64748B', fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fill: '#64748B', fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: '#1E293B',
+                        border: 'none',
+                        borderRadius: '12px',
+                        color: '#fff',
+                        fontSize: '12px',
+                      }}
+                      formatter={(value: number) => formatMoney(value, currency)}
+                    />
+                    <Legend wrapperStyle={{ fontSize: '12px' }} />
+                    {(Object.values(ACCOUNT_TYPE_META)).map((meta) => (
+                      <Line
+                        key={meta.label}
+                        type="monotone"
+                        dataKey={meta.label}
+                        stroke={meta.color}
+                        strokeWidth={2.5}
+                        dot={{ r: 3, fill: meta.color }}
+                        activeDot={{ r: 5 }}
+                      />
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
 
             <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
               <h4 className="font-semibold text-slate-800 mb-4">各账户近6个月余额变化</h4>

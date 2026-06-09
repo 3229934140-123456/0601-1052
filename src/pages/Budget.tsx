@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Edit2, AlertTriangle, X, TrendingDown, BarChart3, CalendarRange } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Edit2, AlertTriangle, X, TrendingDown, BarChart3, CalendarRange, Download, Filter } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { DynamicIcon } from '@/components/DynamicIcon';
 import { ProgressBar } from '@/components/ProgressBar';
@@ -17,6 +17,8 @@ export const Budget = () => {
   const [showCategoryBudgetModal, setShowCategoryBudgetModal] = useState<string | null>(null);
   const [showCategoryDetailModal, setShowCategoryDetailModal] = useState<string | null>(null);
   const [budgetAmount, setBudgetAmount] = useState('');
+  const [detailAccountFilter, setDetailAccountFilter] = useState<string | null>(null);
+  const [showExportReport, setShowExportReport] = useState(false);
 
   const transactions = useStore((s) => s.transactions);
   const allCategories = useStore((s) => s.categories);
@@ -218,24 +220,33 @@ export const Budget = () => {
             </div>
           </div>
 
-          <div className="inline-flex p-1 bg-white/10 backdrop-blur rounded-xl gap-1">
-            {([
-              { key: 'month' as RangeType, label: '月度' },
-              { key: 'quarter' as RangeType, label: '季度' },
-              { key: 'year' as RangeType, label: '年度' },
-            ]).map((r) => (
-              <button
-                key={r.key}
-                onClick={() => setRangeType(r.key)}
-                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                  rangeType === r.key
-                    ? 'bg-white text-amber-600 shadow'
-                    : 'text-white/80 hover:text-white'
-                }`}
-              >
-                {r.label}
-              </button>
-            ))}
+          <div className="flex items-center justify-between gap-2">
+            <div className="inline-flex p-1 bg-white/10 backdrop-blur rounded-xl gap-1">
+              {([
+                { key: 'month' as RangeType, label: '月度' },
+                { key: 'quarter' as RangeType, label: '季度' },
+                { key: 'year' as RangeType, label: '年度' },
+              ]).map((r) => (
+                <button
+                  key={r.key}
+                  onClick={() => setRangeType(r.key)}
+                  className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    rangeType === r.key
+                      ? 'bg-white text-amber-600 shadow'
+                      : 'text-white/80 hover:text-white'
+                  }`}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setShowExportReport(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/10 backdrop-blur text-white/90 hover:bg-white/20 transition-colors text-sm"
+            >
+              <Download size={15} />
+              <span>导出报告</span>
+            </button>
           </div>
         </div>
 
@@ -498,7 +509,10 @@ export const Budget = () => {
 
       <Modal
         open={!!showCategoryDetailModal}
-        onClose={() => setShowCategoryDetailModal(null)}
+        onClose={() => {
+          setShowCategoryDetailModal(null);
+          setDetailAccountFilter(null);
+        }}
         title="预算执行详情"
       >
         {showCategoryDetailModal && (() => {
@@ -603,38 +617,171 @@ export const Budget = () => {
               </div>
 
               <div>
-                <h5 className="text-sm font-semibold text-slate-700 mb-3">
-                  {rangeMonths.length > 1 ? `${rangeMonths.length}个月账单` : '本月账单'} ({catTxns.length}条)
-                </h5>
-                {catTxns.length === 0 ? (
-                  <div className="text-center py-6 text-slate-400 text-sm">
-                    暂无相关账单
+                <div className="flex items-center justify-between mb-3">
+                  <h5 className="text-sm font-semibold text-slate-700">
+                    {rangeMonths.length > 1 ? `${rangeMonths.length}个月账单` : '本月账单'}
+                  </h5>
+                  <div className="flex items-center gap-1.5">
+                    <Filter size={12} className="text-slate-400" />
+                    <select
+                      value={detailAccountFilter || ''}
+                      onChange={(e) => setDetailAccountFilter(e.target.value || null)}
+                      className="text-xs px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 outline-none focus:border-amber-300"
+                    >
+                      <option value="">全部账户</option>
+                      {allAccounts.map((a) => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                      ))}
+                    </select>
                   </div>
-                ) : (
-                  <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {catTxns.map((t) => {
-                      const acc = allAccounts.find((a) => a.id === t.accountId);
-                      return (
-                        <div key={t.id} className="flex items-center gap-3 py-2 border-b border-slate-50 last:border-0">
-                          <span className="text-xs text-slate-400 w-14">{t.date.slice(0)}</span>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-sm text-slate-700 truncate">
-                              {t.note || cat.name}
+                </div>
+                {(() => {
+                  const filteredTxns = detailAccountFilter
+                    ? catTxns.filter((t) => t.accountId === detailAccountFilter)
+                    : catTxns;
+                  if (filteredTxns.length === 0) {
+                    return (
+                      <div className="text-center py-6 text-slate-400 text-sm">
+                        暂无相关账单
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {filteredTxns.map((t) => {
+                        const acc = allAccounts.find((a) => a.id === t.accountId);
+                        return (
+                          <div key={t.id} className="flex items-center gap-3 py-2 border-b border-slate-50 last:border-0">
+                            <span className="text-xs text-slate-400 w-14">{t.date.slice(0)}</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm text-slate-700 truncate">
+                                {t.note || cat.name}
+                              </div>
+                              <div className="text-xs text-slate-400">{acc?.name}</div>
                             </div>
-                            <div className="text-xs text-slate-400">{acc?.name}</div>
+                            <span className="text-sm font-semibold text-slate-800">
+                              -{formatMoney(t.amount, currency)}
+                            </span>
                           </div>
-                          <span className="text-sm font-semibold text-slate-800">
-                            -{formatMoney(t.amount, currency)}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           );
         })()}
+      </Modal>
+
+      <Modal
+        open={showExportReport}
+        onClose={() => setShowExportReport(false)}
+        title="导出预算报告"
+      >
+        <div className="space-y-4">
+          <div className="bg-slate-50 rounded-2xl p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-slate-500">报告周期</span>
+              <span className="text-sm font-semibold text-slate-800">{rangeLabel}</span>
+            </div>
+            <div className="flex items-center justify-between pt-2 border-t border-slate-200/60">
+              <span className="text-sm text-slate-500">累计支出</span>
+              <span className="text-base font-bold text-slate-800">{formatMoney(rangeExpense, currency)}</span>
+            </div>
+            {rangeMonths.length > 1 && (
+              <div className="flex items-center justify-between pt-2 border-t border-slate-200/60">
+                <span className="text-sm text-slate-500">月均支出</span>
+                <span className="text-sm font-semibold text-slate-600">{formatMoney(rangeExpense / rangeMonths.length, currency)}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between pt-2 border-t border-slate-200/60">
+              <span className="text-sm text-slate-500">分类数量</span>
+              <span className="text-sm font-semibold text-slate-600">{categories.filter((c) => (rangeCategoryExpenses[c.id] || 0) > 0).length}</span>
+            </div>
+          </div>
+
+          <div>
+            <h5 className="text-sm font-semibold text-slate-700 mb-2">分类明细预览</h5>
+            <div className="space-y-1.5 max-h-48 overflow-y-auto rounded-xl bg-slate-50 p-3">
+              {categories
+                .filter((c) => (rangeCategoryExpenses[c.id] || 0) > 0)
+                .sort((a, b) => (rangeCategoryExpenses[b.id] || 0) - (rangeCategoryExpenses[a.id] || 0))
+                .map((c) => {
+                  const v = rangeCategoryExpenses[c.id] || 0;
+                  return (
+                    <div key={c.id} className="flex items-center justify-between text-xs py-1">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${c.color}20`, color: c.color }}>
+                          <DynamicIcon name={c.icon} size={12} />
+                        </div>
+                        <span className="text-slate-700">{c.name}</span>
+                      </div>
+                      <span className="text-slate-600 font-medium">{formatMoney(v, currency)}</span>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <button
+              onClick={() => setShowExportReport(false)}
+              className="flex-1 py-3 rounded-xl bg-slate-100 text-slate-700 font-medium hover:bg-slate-200 transition-colors"
+            >
+              取消
+            </button>
+            <button
+              onClick={() => {
+                const lines: string[] = [];
+                lines.push(`# 预算执行报告`);
+                lines.push(`周期: ${rangeLabel}`);
+                lines.push(`生成时间: ${new Date().toLocaleString('zh-CN')}`);
+                lines.push('');
+                lines.push(`## 汇总`);
+                lines.push(`累计支出: ${formatMoney(rangeExpense, currency)}`);
+                if (rangeMonths.length > 1) {
+                  lines.push(`月均支出: ${formatMoney(rangeExpense / rangeMonths.length, currency)}`);
+                }
+                lines.push(`涵盖月份: ${rangeMonths.map(formatMonthCN).join(', ')}`);
+                lines.push('');
+                lines.push(`## 分类明细`);
+                const sortedCats = categories
+                  .filter((c) => (rangeCategoryExpenses[c.id] || 0) > 0)
+                  .sort((a, b) => (rangeCategoryExpenses[b.id] || 0) - (rangeCategoryExpenses[a.id] || 0));
+                sortedCats.forEach((c, i) => {
+                  const v = rangeCategoryExpenses[c.id] || 0;
+                  const pct = rangeExpense > 0 ? ((v / rangeExpense) * 100).toFixed(1) : '0';
+                  lines.push(`${i + 1}. ${c.name}: ${formatMoney(v, currency)} (${pct}%)`);
+                });
+                lines.push('');
+                lines.push(`## 账单明细`);
+                const allTxns = transactions
+                  .filter((t) => rangeMonths.includes(formatMonth(t.date)) && t.type === 'expense')
+                  .sort((a, b) => b.date.localeCompare(a.date));
+                allTxns.forEach((t) => {
+                  const cat = allCategories.find((c) => c.id === t.categoryId);
+                  const acc = allAccounts.find((a) => a.id === t.accountId);
+                  lines.push(`- ${t.date} | ${cat?.name || '未知'} | ${acc?.name || '未知'} | ${formatMoney(t.amount, currency)}${t.note ? ` | ${t.note}` : ''}`);
+                });
+                const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `预算报告_${rangeLabel.replace(/\s/g, '')}_${new Date().toISOString().slice(0, 10)}.md`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                setShowExportReport(false);
+              }}
+              className="flex-1 py-3 rounded-xl bg-amber-500 text-white font-medium hover:bg-amber-600 transition-colors flex items-center justify-center gap-2"
+            >
+              <Download size={16} />
+              <span>下载 Markdown</span>
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

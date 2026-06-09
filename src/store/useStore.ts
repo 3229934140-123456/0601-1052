@@ -70,6 +70,8 @@ interface StoreState extends AppData {
   addRecurring: (r: Omit<Recurring, 'id' | 'nextDate'>) => void;
   updateRecurring: (id: string, r: Partial<Recurring>) => void;
   deleteRecurring: (id: string) => void;
+  skipRecurringNext: (id: string) => void;
+  recordRecurringNow: (id: string) => void;
   processRecurring: () => void;
   updateSettings: (s: Partial<Settings>) => void;
   setPassword: (password: string) => void;

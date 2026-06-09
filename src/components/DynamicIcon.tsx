@@ -23,11 +23,12 @@ interface DynamicIconProps {
   name: string;
   size?: number;
   className?: string;
+  style?: React.CSSProperties;
 }
 
-export const DynamicIcon = ({ name, size = 20, className = '' }: DynamicIconProps) => {
+export const DynamicIcon = ({ name, size = 20, className = '', style }: DynamicIconProps) => {
   const Icon = iconMap[name] || MoreHorizontal;
-  return <Icon size={size} className={className} />;
+  return <Icon size={size} className={className} style={style} />;
 };
 
 export { iconMap };

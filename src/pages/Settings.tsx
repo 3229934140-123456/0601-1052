@@ -3,13 +3,14 @@ import {
   ChevronRight, Plus, Edit2, Trash2, Tag, Wallet, RefreshCcw,
   Download, Upload, Lock, Unlock, AlertTriangle, Check, Eye, EyeOff,
   RefreshCw, ArrowRightLeft, Scale, History, X, SkipForward, Zap, Calendar,
+  CalendarDays, List, Clock,
 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { DynamicIcon } from '@/components/DynamicIcon';
 import { Modal } from '@/components/Modal';
 import { PageHeader } from '@/components/Layout/PageHeader';
 import { exportData, importData } from '@/utils/export';
-import { todayStr, formatDateCN, getUpcomingDates } from '@/utils/date';
+import { todayStr, formatDateCN, formatMonthCN, getUpcomingDates } from '@/utils/date';
 import { formatMoney } from '@/utils/money';
 import type { Category, Account, Recurring, TransactionType, Frequency } from '@/types';
 
@@ -1119,6 +1120,7 @@ const RecurringSection = ({ onClose }: SectionProps) => {
   const [editingRecurring, setEditingRecurring] = useState<Recurring | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'list' | 'timeline'>('list');
 
   const allRecurring = useStore((s) => s.recurring);
   const categories = useStore((s) => s.categories);
@@ -1134,6 +1136,31 @@ const RecurringSection = ({ onClose }: SectionProps) => {
     () => [...allRecurring].sort((a, b) => a.nextDate.localeCompare(b.nextDate)),
     [allRecurring]
   );
+
+  const timelineEvents = useMemo(() => {
+    interface TimelineEvent {
+      date: string;
+      recurring: Recurring;
+      occurrenceIndex: number;
+    }
+    const events: TimelineEvent[] = [];
+    recurring.filter((r) => r.active).forEach((r) => {
+      getUpcomingDates(r.nextDate, r.frequency, 6).forEach((d, i) => {
+        events.push({ date: d, recurring: r, occurrenceIndex: i });
+      });
+    });
+    return events.sort((a, b) => a.date.localeCompare(b.date));
+  }, [recurring]);
+
+  const timelineByMonth = useMemo(() => {
+    const grouped: Record<string, typeof timelineEvents> = {};
+    timelineEvents.forEach((e) => {
+      const m = e.date.slice(0, 7);
+      if (!grouped[m]) grouped[m] = [];
+      grouped[m].push(e);
+    });
+    return grouped;
+  }, [timelineEvents]);
 
   const openNew = () => {
     setIsNew(true);
@@ -1199,7 +1226,27 @@ const RecurringSection = ({ onClose }: SectionProps) => {
       maxWidth="max-w-xl"
     >
       <div className="space-y-4">
-        <div className="flex justify-end">
+        <div className="flex items-center justify-between gap-2">
+          <div className="inline-flex p-1 bg-slate-100 rounded-xl gap-0.5">
+            <button
+              onClick={() => setViewMode('list')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                viewMode === 'list' ? 'bg-white text-slate-700 shadow' : 'text-slate-500'
+              }`}
+            >
+              <List size={14} />
+              <span>列表</span>
+            </button>
+            <button
+              onClick={() => setViewMode('timeline')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                viewMode === 'timeline' ? 'bg-white text-slate-700 shadow' : 'text-slate-500'
+              }`}
+            >
+              <CalendarDays size={14} />
+              <span>时间线</span>
+            </button>
+          </div>
           <button
             onClick={openNew}
             className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-teal-500 text-white text-sm font-medium hover:bg-teal-600 transition-colors"
@@ -1215,7 +1262,7 @@ const RecurringSection = ({ onClose }: SectionProps) => {
             <p className="text-sm">暂无周期账单</p>
             <p className="text-xs mt-1">设置定期自动记账，如房租、工资等</p>
           </div>
-        ) : (
+        ) : viewMode === 'list' ? (
           <div className="space-y-2">
             {recurring.map((r) => {
               const cat = categories.find((c) => c.id === r.categoryId);
@@ -1324,6 +1371,74 @@ const RecurringSection = ({ onClose }: SectionProps) => {
                 </div>
               );
             })}
+          </div>
+        ) : (
+          <div className="space-y-5">
+            {Object.keys(timelineByMonth).sort().map((month) => (
+              <div key={month} className="space-y-2">
+                <div className="flex items-center gap-2 px-1">
+                  <Clock size={14} className="text-slate-400" />
+                  <span className="text-sm font-semibold text-slate-700">
+                    {formatMonthCN(month)}
+                  </span>
+                  <div className="flex-1 h-px bg-slate-200" />
+                </div>
+                <div className="space-y-1.5 pl-6 border-l-2 border-slate-100 ml-[7px]">
+                  {timelineByMonth[month].map((e, idx) => {
+                    const r = e.recurring;
+                    const cat = categories.find((c) => c.id === r.categoryId);
+                    const acc = accounts.find((a) => a.id === r.accountId);
+                    const isFirst = e.occurrenceIndex === 0;
+                    return (
+                      <div
+                        key={`${r.id}-${e.date}-${idx}`}
+                        className="relative p-3 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors"
+                      >
+                        <div className="absolute -left-[27px] top-1/2 -translate-y-1/2 w-3 h-3 rounded-full border-2 border-white" style={{ backgroundColor: cat?.color || '#6B7280' }} />
+                        <div className="flex items-center gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-medium text-slate-500">{formatDateCN(e.date)}</span>
+                              {isFirst && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700 font-medium">下一次</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <DynamicIcon name={cat?.icon || 'MoreHorizontal'} size={13} style={{ color: cat?.color }} />
+                              <span className="text-sm font-medium text-slate-800">{cat?.name || '未知'}</span>
+                              <span className="text-[11px] text-slate-400">· {acc?.name}</span>
+                            </div>
+                          </div>
+                          <div className={`text-sm font-bold ${r.type === 'income' ? 'text-emerald-600' : 'text-slate-800'}`}>
+                            {r.type === 'income' ? '+' : '-'}{formatMoney(r.amount, currency)}
+                          </div>
+                          {isFirst && (
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => recordRecurringNow(r.id)}
+                                disabled={!r.active}
+                                className="p-1.5 rounded-lg bg-teal-500 text-white hover:bg-teal-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                title="立即记一笔"
+                              >
+                                <Zap size={13} />
+                              </button>
+                              <button
+                                onClick={() => skipRecurringNext(r.id)}
+                                disabled={!r.active}
+                                className="p-1.5 rounded-lg bg-amber-500 text-white hover:bg-amber-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                title="跳过本期"
+                              >
+                                <SkipForward size={13} />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
