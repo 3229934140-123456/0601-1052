@@ -1,0 +1,394 @@
+import { create } from 'zustand';
+import type {
+  Transaction,
+  Category,
+  Account,
+  Budget,
+  Recurring,
+  Settings,
+  AppData,
+  TransactionType,
+} from '@/types';
+import { loadFromStorage, saveToStorage } from '@/utils/storage';
+import { todayStr, currentMonthStr, getNextDate } from '@/utils/date';
+
+const generateId = (): string => Math.random().toString(36).slice(2, 11);
+
+const defaultCategories: Category[] = [
+  { id: 'cat-food', name: '餐饮', type: 'expense', icon: 'UtensilsCrossed', color: '#F97316', sort: 0 },
+  { id: 'cat-transport', name: '交通', type: 'expense', icon: 'Car', color: '#3B82F6', sort: 1 },
+  { id: 'cat-shopping', name: '购物', type: 'expense', icon: 'ShoppingBag', color: '#EC4899', sort: 2 },
+  { id: 'cat-entertainment', name: '娱乐', type: 'expense', icon: 'Gamepad2', color: '#8B5CF6', sort: 3 },
+  { id: 'cat-housing', name: '居住', type: 'expense', icon: 'Home', color: '#14B8A6', sort: 4 },
+  { id: 'cat-medical', name: '医疗', type: 'expense', icon: 'Heart', color: '#EF4444', sort: 5 },
+  { id: 'cat-education', name: '教育', type: 'expense', icon: 'GraduationCap', color: '#6366F1', sort: 6 },
+  { id: 'cat-other-exp', name: '其他', type: 'expense', icon: 'MoreHorizontal', color: '#6B7280', sort: 7 },
+  { id: 'cat-salary', name: '工资', type: 'income', icon: 'Briefcase', color: '#10B981', sort: 0 },
+  { id: 'cat-bonus', name: '奖金', type: 'income', icon: 'Gift', color: '#22C55E', sort: 1 },
+  { id: 'cat-invest', name: '投资', type: 'income', icon: 'TrendingUp', color: '#06B6D4', sort: 2 },
+  { id: 'cat-parttime', name: '兼职', type: 'income', icon: 'Clock', color: '#F59E0B', sort: 3 },
+  { id: 'cat-redpacket', name: '红包', type: 'income', icon: 'Coins', color: '#EF4444', sort: 4 },
+  { id: 'cat-other-inc', name: '其他', type: 'income', icon: 'MoreHorizontal', color: '#6B7280', sort: 5 },
+];
+
+const defaultAccounts: Account[] = [
+  { id: 'acc-cash', name: '现金', type: 'cash', icon: 'Wallet', color: '#10B981', balance: 0, sort: 0 },
+  { id: 'acc-bank', name: '银行卡', type: 'bank', icon: 'Landmark', color: '#3B82F6', balance: 0, sort: 1 },
+  { id: 'acc-alipay', name: '支付宝', type: 'alipay', icon: 'Smartphone', color: '#06B6D4', balance: 0, sort: 2 },
+  { id: 'acc-wechat', name: '微信钱包', type: 'wechat', icon: 'MessageCircle', color: '#22C55E', balance: 0, sort: 3 },
+];
+
+const defaultSettings: Settings = {
+  privacyLockEnabled: false,
+  privacyPassword: '',
+  currency: '¥',
+  firstDayOfWeek: 1,
+};
+
+interface StoreState extends AppData {
+  isUnlocked: boolean;
+  initialize: () => void;
+  addTransaction: (t: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'>) => void;
+  updateTransaction: (id: string, t: Partial<Transaction>) => void;
+  deleteTransaction: (id: string) => void;
+  deleteTransactions: (ids: string[]) => void;
+  addCategory: (c: Omit<Category, 'id' | 'sort'>) => void;
+  updateCategory: (id: string, c: Partial<Category>) => void;
+  deleteCategory: (id: string) => void;
+  addAccount: (a: Omit<Account, 'id' | 'sort' | 'balance'> & { balance?: number }) => void;
+  updateAccount: (id: string, a: Partial<Account>) => void;
+  deleteAccount: (id: string) => void;
+  setBudget: (month: string, categoryId: string | null, amount: number) => void;
+  deleteBudget: (id: string) => void;
+  addRecurring: (r: Omit<Recurring, 'id' | 'nextDate'>) => void;
+  updateRecurring: (id: string, r: Partial<Recurring>) => void;
+  deleteRecurring: (id: string) => void;
+  processRecurring: () => void;
+  updateSettings: (s: Partial<Settings>) => void;
+  setPassword: (password: string) => void;
+  unlock: (password: string) => boolean;
+  lock: () => void;
+  importAll: (data: AppData) => void;
+  resetAll: () => void;
+  recalculateBalances: () => void;
+}
+
+const getInitialState = (): AppData => {
+  const saved = loadFromStorage();
+  if (saved) {
+    return saved;
+  }
+  return {
+    transactions: [],
+    categories: defaultCategories,
+    accounts: defaultAccounts,
+    budgets: [],
+    recurring: [],
+    settings: defaultSettings,
+  };
+};
+
+export const useStore = create<StoreState>((set, get) => ({
+  ...getInitialState(),
+  isUnlocked: true,
+
+  initialize: () => {
+    const state = get();
+    if (state.settings.privacyLockEnabled) {
+      set({ isUnlocked: false });
+    }
+    get().processRecurring();
+  },
+
+  addTransaction: (t) => {
+    const newT: Transaction = {
+      ...t,
+      id: generateId(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    set((state) => {
+      const transactions = [newT, ...state.transactions];
+      const newState = { ...state, transactions };
+      saveToStorage(newState);
+      return newState;
+    });
+    get().recalculateBalances();
+  },
+
+  updateTransaction: (id, t) => {
+    set((state) => {
+      const transactions = state.transactions.map((item) =>
+        item.id === id ? { ...item, ...t, updatedAt: new Date().toISOString() } : item
+      );
+      const newState = { ...state, transactions };
+      saveToStorage(newState);
+      return newState;
+    });
+    get().recalculateBalances();
+  },
+
+  deleteTransaction: (id) => {
+    set((state) => {
+      const transactions = state.transactions.filter((item) => item.id !== id);
+      const newState = { ...state, transactions };
+      saveToStorage(newState);
+      return newState;
+    });
+    get().recalculateBalances();
+  },
+
+  deleteTransactions: (ids) => {
+    set((state) => {
+      const transactions = state.transactions.filter((item) => !ids.includes(item.id));
+      const newState = { ...state, transactions };
+      saveToStorage(newState);
+      return newState;
+    });
+    get().recalculateBalances();
+  },
+
+  addCategory: (c) => {
+    set((state) => {
+      const maxSort = state.categories
+        .filter((cat) => cat.type === c.type)
+        .reduce((max, cat) => Math.max(max, cat.sort), -1);
+      const newCat: Category = { ...c, id: generateId(), sort: maxSort + 1 };
+      const categories = [...state.categories, newCat];
+      const newState = { ...state, categories };
+      saveToStorage(newState);
+      return newState;
+    });
+  },
+
+  updateCategory: (id, c) => {
+    set((state) => {
+      const categories = state.categories.map((item) =>
+        item.id === id ? { ...item, ...c } : item
+      );
+      const newState = { ...state, categories };
+      saveToStorage(newState);
+      return newState;
+    });
+  },
+
+  deleteCategory: (id) => {
+    set((state) => {
+      const categories = state.categories.filter((item) => item.id !== id);
+      const newState = { ...state, categories };
+      saveToStorage(newState);
+      return newState;
+    });
+  },
+
+  addAccount: (a) => {
+    set((state) => {
+      const maxSort = state.accounts.reduce((max, acc) => Math.max(max, acc.sort), -1);
+      const newAcc: Account = { ...a, id: generateId(), sort: maxSort + 1, balance: a.balance ?? 0 };
+      const accounts = [...state.accounts, newAcc];
+      const newState = { ...state, accounts };
+      saveToStorage(newState);
+      return newState;
+    });
+  },
+
+  updateAccount: (id, a) => {
+    set((state) => {
+      const accounts = state.accounts.map((item) =>
+        item.id === id ? { ...item, ...a } : item
+      );
+      const newState = { ...state, accounts };
+      saveToStorage(newState);
+      return newState;
+    });
+  },
+
+  deleteAccount: (id) => {
+    set((state) => {
+      const accounts = state.accounts.filter((item) => item.id !== id);
+      const newState = { ...state, accounts };
+      saveToStorage(newState);
+      return newState;
+    });
+  },
+
+  setBudget: (month, categoryId, amount) => {
+    set((state) => {
+      const existing = state.budgets.find(
+        (b) => b.month === month && b.categoryId === categoryId
+      );
+      let budgets: Budget[];
+      if (existing) {
+        budgets = state.budgets.map((b) =>
+          b.id === existing.id ? { ...b, amount } : b
+        );
+      } else {
+        const newBudget: Budget = {
+          id: generateId(),
+          categoryId,
+          amount,
+          month,
+        };
+        budgets = [...state.budgets, newBudget];
+      }
+      const newState = { ...state, budgets };
+      saveToStorage(newState);
+      return newState;
+    });
+  },
+
+  deleteBudget: (id) => {
+    set((state) => {
+      const budgets = state.budgets.filter((b) => b.id !== id);
+      const newState = { ...state, budgets };
+      saveToStorage(newState);
+      return newState;
+    });
+  },
+
+  addRecurring: (r) => {
+    set((state) => {
+      const newR: Recurring = {
+        ...r,
+        id: generateId(),
+        nextDate: getNextDate(r.startDate, r.frequency),
+      };
+      const recurring = [...state.recurring, newR];
+      const newState = { ...state, recurring };
+      saveToStorage(newState);
+      return newState;
+    });
+  },
+
+  updateRecurring: (id, r) => {
+    set((state) => {
+      const recurring = state.recurring.map((item) =>
+        item.id === id ? { ...item, ...r } : item
+      );
+      const newState = { ...state, recurring };
+      saveToStorage(newState);
+      return newState;
+    });
+  },
+
+  deleteRecurring: (id) => {
+    set((state) => {
+      const recurring = state.recurring.filter((item) => item.id !== id);
+      const newState = { ...state, recurring };
+      saveToStorage(newState);
+      return newState;
+    });
+  },
+
+  processRecurring: () => {
+    const state = get();
+    const today = todayStr();
+    const dueRecurring = state.recurring.filter(
+      (r) => r.active && r.nextDate <= today
+    );
+    dueRecurring.forEach((r) => {
+      get().addTransaction({
+        type: r.type,
+        amount: r.amount,
+        categoryId: r.categoryId,
+        accountId: r.accountId,
+        date: r.nextDate,
+        note: r.note,
+      });
+      get().updateRecurring(r.id, {
+        nextDate: getNextDate(r.nextDate, r.frequency),
+      });
+    });
+  },
+
+  updateSettings: (s) => {
+    set((state) => {
+      const settings = { ...state.settings, ...s };
+      const newState = { ...state, settings };
+      saveToStorage(newState);
+      return newState;
+    });
+  },
+
+  setPassword: (password) => {
+    set((state) => {
+      const settings = {
+        ...state.settings,
+        privacyPassword: password,
+        privacyLockEnabled: !!password,
+      };
+      const newState = { ...state, settings, isUnlocked: true };
+      saveToStorage(newState);
+      return newState;
+    });
+  },
+
+  unlock: (password) => {
+    const state = get();
+    if (state.settings.privacyPassword === password) {
+      set({ isUnlocked: true });
+      return true;
+    }
+    return false;
+  },
+
+  lock: () => {
+    set({ isUnlocked: false });
+  },
+
+  importAll: (data) => {
+    set(() => {
+      saveToStorage(data);
+      return { ...data, isUnlocked: true };
+    });
+  },
+
+  resetAll: () => {
+    const initial: AppData = {
+      transactions: [],
+      categories: defaultCategories,
+      accounts: defaultAccounts,
+      budgets: [],
+      recurring: [],
+      settings: defaultSettings,
+    };
+    set(() => {
+      saveToStorage(initial);
+      return { ...initial, isUnlocked: true };
+    });
+  },
+
+  recalculateBalances: () => {
+    set((state) => {
+      const balances = new Map<string, number>();
+      state.accounts.forEach((a) => balances.set(a.id, 0));
+      state.transactions
+        .slice()
+        .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt))
+        .forEach((t) => {
+          const current = balances.get(t.accountId) ?? 0;
+          if (t.type === 'income') {
+            balances.set(t.accountId, current + t.amount);
+          } else {
+            balances.set(t.accountId, current - t.amount);
+          }
+        });
+      const accounts = state.accounts.map((a) => ({
+        ...a,
+        balance: balances.get(a.id) ?? 0,
+      }));
+      const newState = { ...state, accounts };
+      saveToStorage(newState);
+      return newState;
+    });
+  },
+}));
+
+export const getCategoriesByType = (type: TransactionType): Category[] => {
+  return useStore
+    .getState()
+    .categories.filter((c) => c.type === type)
+    .sort((a, b) => a.sort - b.sort);
+};
+
+export const getMonthKey = (): string => currentMonthStr();
